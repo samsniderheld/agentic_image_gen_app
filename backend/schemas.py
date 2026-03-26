@@ -2,7 +2,7 @@ from pydantic import BaseModel
 from typing import Optional, Tuple, List, Literal
 
 class GenerationRequest(BaseModel):
-    prompt: str
+    prompt: str = ""  # Can be empty if images are provided for inference
     aspect_ratio: Literal["1:1", "16:9", "9:16", "4:3"] = "1:1"
     seed: Optional[int] = None
     input_image_paths: List[str] = []  # Paths to input images for composition

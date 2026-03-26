@@ -39,6 +39,13 @@ def generate():
     request_data = {k: v for k, v in data.items() if k != "input_images"}
     req = GenerationRequest(**request_data)
 
+    # If no prompt provided but images are uploaded, infer a composition prompt
+    if (not req.prompt or req.prompt.strip() == "") and input_images:
+        from factory import ModelFactory
+        inferred_prompt = ModelFactory.get_critic().infer_composition_prompt(input_images)
+        print(f"Inferred prompt: {inferred_prompt}")
+        req.prompt = inferred_prompt
+
     state.pipeline.update(request=req.model_dump(), stage="generating", input_images=input_images)
 
     # Step 1: Generate image

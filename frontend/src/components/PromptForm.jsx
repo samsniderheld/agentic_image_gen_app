@@ -63,14 +63,20 @@ export default function PromptForm({ onAdvance }) {
       <h1>Agentic Image Generator</h1>
       <form onSubmit={handleSubmit}>
         <div style={{ marginBottom: '15px' }}>
-          <label style={{ display: 'block', marginBottom: '5px' }}>Prompt:</label>
+          <label style={{ display: 'block', marginBottom: '5px' }}>
+            Prompt {inputImages.length > 0 && <span style={{ fontSize: '12px', color: '#666' }}>(optional - AI will suggest composition if empty)</span>}:
+          </label>
           <textarea
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
             rows={4}
             style={{ width: '100%', padding: '8px' }}
-            placeholder="E.g., 'Combine these images into a surreal landscape' or 'A red car on a mountain road'"
-            required
+            placeholder={
+              inputImages.length > 0
+                ? "Leave empty to let AI suggest a composition prompt, or describe your desired composition..."
+                : "E.g., 'A serene mountain landscape at sunset'"
+            }
+            required={inputImages.length === 0}
             disabled={loading}
           />
         </div>
@@ -150,18 +156,23 @@ export default function PromptForm({ onAdvance }) {
 
         <button
           type="submit"
-          disabled={loading || !prompt.trim()}
+          disabled={loading || (inputImages.length === 0 && !prompt.trim())}
           style={{
             padding: '10px 20px',
-            backgroundColor: loading ? '#ccc' : '#007bff',
+            backgroundColor: loading || (inputImages.length === 0 && !prompt.trim()) ? '#ccc' : '#007bff',
             color: 'white',
             border: 'none',
             borderRadius: '4px',
-            cursor: loading ? 'not-allowed' : 'pointer'
+            cursor: loading || (inputImages.length === 0 && !prompt.trim()) ? 'not-allowed' : 'pointer'
           }}
         >
-          {loading ? 'Generating...' : 'Generate Image'}
+          {loading ? 'Generating...' : inputImages.length > 0 && !prompt.trim() ? 'Generate with AI Prompt' : 'Generate Image'}
         </button>
+        {inputImages.length > 0 && !prompt.trim() && (
+          <p style={{ fontSize: '12px', color: '#666', marginTop: '10px' }}>
+            💡 AI will analyze your images and suggest a composition prompt automatically
+          </p>
+        )}
       </form>
     </div>
   );

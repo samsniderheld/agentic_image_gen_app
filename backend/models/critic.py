@@ -9,6 +9,40 @@ class CriticModel:
         genai.configure(api_key=api_key)
         self.client = genai.GenerativeModel(model_name)
 
+    def infer_composition_prompt(self, images: List[Image.Image]) -> str:
+        """
+        Analyze images and suggest a composition prompt focusing on:
+        - Combining elements from multiple images
+        - Face composition/swapping
+        - Style blending
+        - Object/scene compositing
+        """
+        content_parts = []
+
+        # Add all input images
+        for img in images:
+            buf = io.BytesIO()
+            img.save(buf, format="PNG")
+            img_data = base64.b64encode(buf.getvalue()).decode()
+            content_parts.append({"mime_type": "image/png", "data": img_data})
+
+        # Ask for composition-focused prompt
+        prompt = """Analyze these images and suggest a composition prompt that combines their elements.
+
+Focus on:
+- If faces are present: face composition, expression transfer, or portrait blending
+- Object composition: placing elements from one image into another
+- Style transfer: applying the aesthetic of one image to another
+- Scene merging: blending backgrounds, lighting, or atmospheres
+- Element extraction: taking specific subjects and compositing them together
+
+Return ONLY a clear, actionable composition prompt (1-2 sentences) that describes how to combine these images, nothing else."""
+
+        content_parts.append(prompt)
+
+        response = self.client.generate_content(content_parts)
+        return response.text.strip()
+
     def critique(self, image: Image.Image, original_prompt: str, input_images: Optional[List[Image.Image]] = None) -> CritiqueResult:
         w, h = image.size
         buf = io.BytesIO()
