@@ -25,19 +25,50 @@ def status():
 
 @app.post("/api/generate")
 def generate():
+    import base64
+    import io
+    from PIL import Image
+
     state.reset()
-    req = GenerationRequest(**request.json)
-    state.pipeline.update(request=req.model_dump(), stage="generating")
+    data = request.json
 
-    state.push_message({"role": "agent", "type": "thinking",
-        "content": f"Generating with prompt: \"{req.prompt}\" at {req.aspect_ratio}..."})
+    # Handle base64 encoded input images
+    input_images = []
+    if "input_images" in data and data["input_images"]:
+        for img_b64 in data["input_images"]:
+            # Decode base64 string to image
+            img_data = base64.b64decode(img_b64.split(',')[1] if ',' in img_b64 else img_b64)
+            img = Image.open(io.BytesIO(img_data))
+            input_images.append(img)
 
-    agent.run_adk_segment(
-        agent_yaml="generation_agent",
-        input_message="Generate the image now.",
-        state_in={"prompt": req.prompt, "aspect_ratio": req.aspect_ratio},
-        state_out_keys=["image_path"]
-    )
+    # Remove input_images from data before creating GenerationRequest
+    request_data = {k: v for k, v in data.items() if k != "input_images"}
+    req = GenerationRequest(**request_data)
+
+    state.pipeline.update(request=req.model_dump(), stage="generating", input_images=input_images, aspect_ratio=req.aspect_ratio)
+
+    if input_images:
+        state.push_message({"role": "agent", "type": "thinking",
+            "content": f"Composing image from {len(input_images)} input image(s) with prompt: \"{req.prompt}\"..."})
+    else:
+        state.push_message({"role": "agent", "type": "thinking",
+            "content": f"Generating with prompt: \"{req.prompt}\" at {req.aspect_ratio}..."})
+
+    # Call the tool directly with input_images support
+    from pipeline.tools import TOOL_REGISTRY
+    class MockToolContext:
+        class Actions:
+            escalate = False
+        actions = Actions()
+
+    # Generate with optional input images
+    from models.generator import GeneratorModel
+    from factory import ModelFactory
+    generator = ModelFactory.get_generator()
+    image = generator.generate(req.prompt, req.aspect_ratio, input_images=input_images or None)
+    path = str(config.OUTPUT_DIR / "00_initial.png")
+    image.save(path)
+    state.pipeline["image_path"] = path
 
     state.push_message({"role": "agent", "type": "text",
         "content": "Done! Here's your initial generation:"})
@@ -116,7 +147,81 @@ def review_initial():
                     "severity": f["severity"],
                     "checked":  f["severity"] in ("high", "medium")}
                   for f in critique["fixes_required"]],
-        "action": "apply_fixes"})
+        "action": "apply_fixes",
+        "allowRecritique": True})
+    state.pipeline["stage"] = "awaiting_fix_review"
+
+    new_msgs = state.pipeline["messages"][-10:]
+    return jsonify({"stage": state.pipeline["stage"],
+                    "critique": critique,
+                    "messages": new_msgs})
+
+# ── Re-run Critique ───────────────────────────────────────────────
+
+@app.post("/api/recritique")
+def recritique():
+    """Re-run critique on the current image (useful after applying custom fixes or manual edits)."""
+    # Use the fixed image if available, otherwise use the original
+    current_image_path = state.pipeline.get("fixed_image_path") or state.pipeline.get("image_path")
+
+    if not current_image_path:
+        return jsonify({"error": "No image to critique"}), 400
+
+    # Update the image_path to the current version so subsequent fixes apply to it
+    if state.pipeline.get("fixed_image_path"):
+        state.pipeline["image_path"] = state.pipeline["fixed_image_path"]
+        # Determine which output file to show
+        import os
+        filename = os.path.basename(current_image_path)
+        display_url = f"/outputs/{filename}"
+    else:
+        display_url = "/outputs/00_initial.png"
+
+    state.push_message({"role": "user", "type": "text", "content": "Run critique again."})
+    state.push_message({"role": "agent", "type": "thinking",
+        "content": "Running vision critique on the current image..."})
+
+    # Show the current image being critiqued
+    state.push_message({"role": "agent", "type": "image",
+        "url": display_url, "caption": "Current image"})
+
+    agent.run_adk_segment(
+        agent_yaml="critique_agent",
+        input_message="Critique the current image.",
+        state_in={"image_path": current_image_path,
+                  "prompt": state.pipeline["request"]["prompt"]},
+        state_out_keys=["critique_json"]
+    )
+
+    critique = state.pipeline["critique_json"]
+    state.pipeline["critique"] = critique
+    passed = critique["pass_threshold_met"]
+
+    state.push_message({"role": "agent", "type": "critique",
+        "score":      critique["overall_score"],
+        "assessment": critique["overall_assessment"],
+        "passed":     passed})
+
+    # Show the annotated image with issues marked
+    state.push_message({"role": "agent", "type": "image",
+        "url": "/outputs/01_annotated.png", "caption": "Issues annotated"})
+
+    # Show checklist with new critique results
+    if critique["fixes_required"]:
+        prompt_text = "Select which fixes to apply (or skip all to finalize):"
+    else:
+        prompt_text = "No issues found! You can finalize the image:"
+
+    state.push_message({"role": "agent", "type": "checklist",
+        "prompt": prompt_text,
+        "items": [{"id":       f["region_id"],
+                    "label":    f["issue_description"],
+                    "severity": f["severity"],
+                    "checked":  f["severity"] in ("high", "medium")}
+                  for f in critique["fixes_required"]],
+        "action": "apply_fixes",
+        "allowRecritique": True})
+
     state.pipeline["stage"] = "awaiting_fix_review"
 
     new_msgs = state.pipeline["messages"][-10:]
@@ -129,8 +234,23 @@ def review_initial():
 @app.post("/api/review/fixes")
 def review_fixes():
     approved_ids = request.json["approved_fix_ids"]
+    custom_fixes_data = request.json.get("custom_fixes", [])
+
+    # Get AI-detected fixes that were selected
     approved = [f for f in state.pipeline["critique"]["fixes_required"]
                 if f["region_id"] in approved_ids]
+
+    # Add custom fixes to the approved list
+    for custom in custom_fixes_data:
+        if custom["id"] in approved_ids:
+            # Create a fix object that matches the expected structure
+            approved.append({
+                "region_id": custom["id"],
+                "bbox": [0, 0, 100, 100],  # Full image
+                "severity": custom.get("severity", "medium"),
+                "issue_description": "Custom user-requested change",
+                "fix_prompt": custom["label"]
+            })
 
     state.push_message({"role": "user", "type": "text",
         "content": f"{len(approved)} fix(es) selected."})
@@ -174,7 +294,8 @@ def review_fixes():
         "prompt": "Accept these changes?",
         "options": [
             {"label": "✓ Accept & Finalize", "value": "accept_all_fixes"},
-            {"label": "✕ Reject & Keep Original",  "value": "reject_all_fixes"}
+            {"label": "✕ Reject & Keep Original",  "value": "reject_all_fixes"},
+            {"label": "🔄 Run Critique Again", "value": "recritique"}
         ]})
 
     state.pipeline["stage"] = "awaiting_fixes_review"

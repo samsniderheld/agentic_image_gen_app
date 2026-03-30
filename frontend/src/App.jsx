@@ -5,11 +5,22 @@ import * as api    from "./api";
 import "./styles.css";
 
 const WELCOME = { role: "agent", type: "text",
-  content: "Hi! Describe what you'd like to generate, and I'll get started." };
+  content: "Hi! Let's create an image. First, choose your aspect ratio:" };
+
+const ASPECT_RATIO_OPTIONS = { role: "agent", type: "options",
+  prompt: "Select aspect ratio:",
+  options: [
+    { label: "1:1 Square", value: "1:1" },
+    { label: "16:9 Landscape", value: "16:9" },
+    { label: "9:16 Portrait", value: "9:16" },
+    { label: "4:3 Standard", value: "4:3" }
+  ]
+};
 
 export default function App() {
-  const [messages,      setMessages]      = useState([WELCOME]);
-  const [stage,         setStage]         = useState("idle");
+  const [messages,      setMessages]      = useState([WELCOME, ASPECT_RATIO_OPTIONS]);
+  const [stage,         setStage]         = useState("selecting_aspect_ratio");
+  const [aspectRatio,   setAspectRatio]   = useState("1:1");
   const [awaitingInput, setAwaitingInput] = useState(null);
   // awaitingInput: null | "edit"
 
@@ -17,8 +28,17 @@ export default function App() {
 
   const append = (newMsgs) => setMessages(m => [...m, ...(newMsgs || [])]);
 
-  const handleSend = async (text) => {
-    append([{ role: "user", type: "text", content: text }]);
+  const handleSend = async (text, images = []) => {
+    // Show user message with text and images
+    const userMsg = { role: "user", type: "text", content: text || "(images attached)" };
+    append([userMsg]);
+
+    // Show image previews if any
+    if (images.length > 0) {
+      images.forEach(img => {
+        append([{ role: "user", type: "image", url: img.data, caption: img.name }]);
+      });
+    }
 
     if (awaitingInput === "edit") {
       setAwaitingInput(null);
@@ -29,14 +49,29 @@ export default function App() {
       return;
     }
 
-    // idle → generate
+    // idle → generate (with optional images)
     setStage("generating");
-    const res = await api.generate({ prompt: text, aspect_ratio: "1:1" });
+    const res = await api.generate({
+      prompt: text,
+      aspect_ratio: aspectRatio,
+      input_images: images.map(img => img.data)
+    });
     setStage(res.stage);
     append(res.messages);
   };
 
   const handleOption = async (value) => {
+    // Handle aspect ratio selection
+    if (["1:1", "16:9", "9:16", "4:3"].includes(value)) {
+      setAspectRatio(value);
+      append([
+        { role: "user", type: "text", content: `Selected ${value}` },
+        { role: "agent", type: "text", content: "Great! Now describe what you'd like to generate." }
+      ]);
+      setStage("idle");
+      return;
+    }
+
     if (value === "accept") {
       setStage("critiquing");
       const res = await api.reviewInitial("accept");
@@ -60,16 +95,26 @@ export default function App() {
       const res = await api.acceptFix(false);
       setStage(res.stage);
       append(res.messages);
+    } else if (value === "recritique") {
+      handleRecritique();
     } else if (value === "start_over") {
-      setMessages([WELCOME]);
-      setStage("idle");
+      setMessages([WELCOME, ASPECT_RATIO_OPTIONS]);
+      setStage("selecting_aspect_ratio");
+      setAspectRatio("1:1");
       setAwaitingInput(null);
     }
   };
 
-  const handleChecklist = async (ids) => {
+  const handleChecklist = async (ids, customFixes = []) => {
     setStage("applying_fixes");
-    const res = await api.reviewFixes(ids);
+    const res = await api.reviewFixes(ids, customFixes);
+    setStage(res.stage);
+    append(res.messages);
+  };
+
+  const handleRecritique = async () => {
+    setStage("running_critique");
+    const res = await api.recritique();
     setStage(res.stage);
     append(res.messages);
   };
@@ -78,6 +123,8 @@ export default function App() {
     ? "Enter your updated prompt..."
     : stage === "idle"
     ? "Describe what you'd like to generate..."
+    : stage === "selecting_aspect_ratio"
+    ? "Select an aspect ratio first..."
     : "Agent is working...";
 
   return (
@@ -87,10 +134,11 @@ export default function App() {
         working={working}
         onOption={handleOption}
         onChecklist={handleChecklist}
+        onRecritique={handleRecritique}
       />
       <InputBar
         onSend={handleSend}
-        disabled={working && !awaitingInput}
+        disabled={(working && !awaitingInput) || stage === "selecting_aspect_ratio"}
         placeholder={inputPlaceholder}
       />
     </div>

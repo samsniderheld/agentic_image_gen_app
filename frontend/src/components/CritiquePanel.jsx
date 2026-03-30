@@ -7,6 +7,11 @@ export default function CritiquePanel({ data, onAdvance }) {
   const [loading, setLoading] = useState(false);
   const [showAnnotated, setShowAnnotated] = useState(true);
 
+  // Custom fix form state
+  const [showCustomFixForm, setShowCustomFixForm] = useState(false);
+  const [customFixes, setCustomFixes] = useState([]);
+  const [customFixPrompt, setCustomFixPrompt] = useState('');
+
   useEffect(() => {
     // Auto-check high and medium severity fixes
     const autoChecked = new Set(
@@ -46,7 +51,20 @@ export default function CritiquePanel({ data, onAdvance }) {
   const handleApplyFixes = async () => {
     setLoading(true);
     try {
-      const res = await reviewFixes(Array.from(checkedFixes));
+      // Combine AI-detected fixes and custom fixes
+      const aiFixIds = Array.from(checkedFixes).filter(id => !id.startsWith('custom_'));
+      const customFixIds = customFixes.map(f => f.region_id);
+      const allFixIds = [...aiFixIds, ...customFixIds];
+
+      // If there are custom fixes, we need to add them to the backend
+      // For now, we'll send just the IDs and handle custom fixes separately
+      const res = await reviewFixes(allFixIds);
+
+      // Store custom fixes in the response data if needed
+      if (customFixes.length > 0) {
+        res.customFixes = customFixes;
+      }
+
       onAdvance(res.stage, res);
     } catch (error) {
       console.error("Apply fixes failed:", error);
@@ -234,6 +252,118 @@ export default function CritiquePanel({ data, onAdvance }) {
             </div>
           )}
 
+          {/* Custom Fix Form */}
+          <div style={{ marginTop: '20px', padding: '15px', backgroundColor: '#fff', borderRadius: '8px', border: '2px dashed #007bff' }}>
+            <h4 style={{ marginTop: 0, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span>Add Custom Fix</span>
+              <button
+                type="button"
+                onClick={() => setShowCustomFixForm(!showCustomFixForm)}
+                style={{
+                  padding: '5px 10px',
+                  fontSize: '12px',
+                  backgroundColor: '#007bff',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '4px',
+                  cursor: 'pointer'
+                }}
+              >
+                {showCustomFixForm ? 'Hide' : 'Show'} Form
+              </button>
+            </h4>
+
+            {showCustomFixForm && (
+              <div style={{ marginTop: '10px' }}>
+                <label style={{ display: 'block', marginBottom: '5px', fontSize: '14px' }}>
+                  Describe what you want to fix or change:
+                </label>
+                <textarea
+                  value={customFixPrompt}
+                  onChange={(e) => setCustomFixPrompt(e.target.value)}
+                  rows={2}
+                  placeholder="E.g., 'Brighten the sky in the top half' or 'Remove the object in the bottom right corner'"
+                  style={{ width: '100%', padding: '8px', fontSize: '14px', marginBottom: '10px' }}
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (customFixPrompt.trim()) {
+                      const newFix = {
+                        region_id: `custom_${customFixes.length}`,
+                        bbox: [0, 0, 100, 100], // Placeholder - will apply to whole image
+                        severity: 'medium',
+                        issue_description: 'Custom user-requested change',
+                        fix_prompt: customFixPrompt.trim()
+                      };
+                      setCustomFixes([...customFixes, newFix]);
+                      setCheckedFixes(new Set([...checkedFixes, newFix.region_id]));
+                      setCustomFixPrompt('');
+                    }
+                  }}
+                  disabled={!customFixPrompt.trim()}
+                  style={{
+                    padding: '8px 15px',
+                    backgroundColor: customFixPrompt.trim() ? '#28a745' : '#ccc',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '4px',
+                    cursor: customFixPrompt.trim() ? 'pointer' : 'not-allowed',
+                    fontSize: '14px'
+                  }}
+                >
+                  + Add Custom Fix
+                </button>
+              </div>
+            )}
+
+            {/* Display custom fixes */}
+            {customFixes.length > 0 && (
+              <div style={{ marginTop: '15px' }}>
+                <strong style={{ fontSize: '14px' }}>Custom Fixes ({customFixes.length}):</strong>
+                {customFixes.map((fix, idx) => (
+                  <div
+                    key={fix.region_id}
+                    style={{
+                      marginTop: '10px',
+                      padding: '10px',
+                      backgroundColor: '#e7f3ff',
+                      borderRadius: '4px',
+                      border: '1px solid #007bff'
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div style={{ flex: 1 }}>
+                        <strong style={{ fontSize: '12px', color: '#007bff' }}>Custom Fix {idx + 1}</strong>
+                        <p style={{ margin: '5px 0 0 0', fontSize: '14px' }}>{fix.fix_prompt}</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setCustomFixes(customFixes.filter((_, i) => i !== idx));
+                          const newChecked = new Set(checkedFixes);
+                          newChecked.delete(fix.region_id);
+                          setCheckedFixes(newChecked);
+                        }}
+                        style={{
+                          padding: '5px 10px',
+                          backgroundColor: '#dc3545',
+                          color: 'white',
+                          border: 'none',
+                          borderRadius: '4px',
+                          cursor: 'pointer',
+                          fontSize: '12px'
+                        }}
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
           <div style={{ marginTop: '20px' }}>
             {critique.pass_threshold_met && (
               <button
@@ -252,22 +382,20 @@ export default function CritiquePanel({ data, onAdvance }) {
                 ✓ Looks Good - Finish
               </button>
             )}
-            {critique.fixes_required.length > 0 && (
-              <button
-                onClick={handleApplyFixes}
-                disabled={loading || checkedFixes.size === 0}
-                style={{
-                  padding: '10px 20px',
-                  backgroundColor: checkedFixes.size === 0 ? '#ccc' : '#007bff',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '4px',
-                  cursor: loading || checkedFixes.size === 0 ? 'not-allowed' : 'pointer'
-                }}
-              >
-                Apply Selected Fixes ({checkedFixes.size})
-              </button>
-            )}
+            <button
+              onClick={handleApplyFixes}
+              disabled={loading || (checkedFixes.size === 0 && customFixes.length === 0)}
+              style={{
+                padding: '10px 20px',
+                backgroundColor: (checkedFixes.size === 0 && customFixes.length === 0) ? '#ccc' : '#007bff',
+                color: 'white',
+                border: 'none',
+                borderRadius: '4px',
+                cursor: loading || (checkedFixes.size === 0 && customFixes.length === 0) ? 'not-allowed' : 'pointer'
+              }}
+            >
+              Apply Fixes ({checkedFixes.size + customFixes.length})
+            </button>
           </div>
         </div>
       </div>
