@@ -37,7 +37,7 @@ This document provides detailed architecture diagrams and data flow explanations
 │  │                   Flask API Routes                        │  │
 │  │  - /api/generate                                          │  │
 │  │  - /api/review/initial                                    │  │
-│  │  - /api/recritique                                        │  │
+│  │  - /api/critique (unified initial + re-critique)          │  │
 │  │  - /api/review/fixes                                      │  │
 │  │  - /api/fix/accept                                        │  │
 │  └─────────────┬─────────────────────────────────────────────┘  │
@@ -45,9 +45,9 @@ This document provides detailed architecture diagrams and data flow explanations
 │                ▼                                                 │
 │  ┌───────────────────────────────────────────────────────────┐  │
 │  │                   Global State                            │  │
-│  │  - pipeline: {stage, request, image_path, ...}            │  │
-│  │  - messages: [...]                                        │  │
-│  │  - PIL Image objects in memory                            │  │
+│  │  - pipeline: {stage, current_image_path,                 │  │
+│  │              original_image_path, messages, ...}          │  │
+│  │  - Simple: single source of truth for current image      │  │
 │  └─────────────┬─────────────────────────────────────────────┘  │
 │                │                                                 │
 │                ▼                                                 │
@@ -120,20 +120,12 @@ backend/
 │                          └─► infer_composition_prompt(images)
 │
 ├── pipeline/
-│   ├── tools.py ────────► ADK Tool Definitions
-│   │                      │
-│   │                      ├─► generate_image()
-│   │                      ├─► critique_image()
-│   │                      ├─► apply_fix()
-│   │                      ├─► apply_all_fixes()
-│   │                      └─► exit_loop()
-│   │
-│   └── composer.py ─────► Image Utilities
+│   └── tools.py ────────► ADK Tool Definitions
 │                          │
-│                          ├─► crop_region()
-│                          ├─► create_mask()
-│                          ├─► recomposite()
-│                          └─► annotate_bboxes()
+│                          ├─► generate_image()
+│                          ├─► critique_image()
+│                          ├─► apply_all_fixes() [full-image inpainting]
+│                          └─► exit_loop()
 │
 ├── agents/
 │   ├── critique_agent.yaml ──► Runs critique_image tool
@@ -144,7 +136,7 @@ backend/
                            │
                            ├─► GenerationRequest
                            ├─► CritiqueResult
-                           ├─► RegionalFix
+                           ├─► Fix (no bounding boxes)
                            └─► ImageIntegration
 ```
 
@@ -253,8 +245,7 @@ POST /api/review/initial
     │   │   │   └─► Gemini API (gemini-3.1-pro-preview)
     │   │   │       └─► Returns CritiqueResult
     │   │   │
-    │   │   └─► annotate_bboxes(image, fixes)
-    │   │       └─► Save: outputs/01_annotated.png
+    │   │   └─► Save copy of image: outputs/01_annotated.png
     │   │
     │   └─► Returns critique JSON
     │
@@ -293,30 +284,29 @@ POST /api/review/fixes
     ├─► Get AI fixes from state.pipeline["critique"]
     ├─► Build fix list:
     │   ├─► AI fixes with matching IDs
-    │   └─► Custom fixes converted to RegionalFix format
+    │   └─► Custom fixes converted to Fix format
     │
     ├─► If no fixes selected:
-    │   ├─► Save final.png
+    │   ├─► Save current_image_path → final.png
     │   └─► Return {stage: "done"}
     │
     ├─► Push message: {type: "thinking", content: "Applying fixes..."}
     │
-    ├─► tools.apply_all_fixes(image_path, fixes_json)
+    ├─► tools.apply_all_fixes(current_image_path, fixes_json)
     │   │
-    │   ├─► Load image
-    │   ├─► Create annotated version with bounding boxes
-    │   ├─► Build combined fix prompt
+    │   ├─► Load image from current_image_path
+    │   ├─► Build combined fix prompt (all fixes listed)
     │   ├─► ModelFactory.get_generator().inpaint()
     │   │   │
     │   │   └─► Gemini API with:
-    │   │       ├─► annotated image (shows what to fix)
+    │   │       ├─► original image
     │   │       ├─► full mask (edit entire image)
     │   │       ├─► fix instructions
     │   │       └─► aspect_ratio from state
     │   │
     │   └─► Save: outputs/fixes_applied.png
     │
-    ├─► Update state.pipeline["fixed_image_path"]
+    ├─► Update: current_image_path = "outputs/fixes_applied.png"
     │
     ├─► Push messages:
     │   ├─► {type: "comparison", leftUrl: "00_initial.png", rightUrl: "fixes_applied.png"}
@@ -393,10 +383,9 @@ User clicks "Apply X Selected Fixes"
     │
     ├─► Custom fixes included in approved list
     │
-    └─► Backend creates RegionalFix:
+    └─► Backend creates Fix:
         {
-          region_id: "custom_0",
-          bbox: [0, 0, 100, 100],  // Full image
+          fix_id: "custom_0",
           severity: "medium",
           issue_description: "Custom user-requested change",
           fix_prompt: "Make the sky more blue"
@@ -411,17 +400,22 @@ User clicks "Apply X Selected Fixes"
 
 ```python
 pipeline = {
-    "stage": str,              # Current workflow stage
-    "request": dict,           # GenerationRequest data
-    "image_path": str,         # Path to current/original image
-    "fixed_image_path": str,   # Path to fixed image (if exists)
-    "input_images": [PIL.Image],  # Input images for composition
-    "aspect_ratio": str,       # Selected aspect ratio
-    "critique": dict,          # CritiqueResult data
-    "critique_json": dict,     # Raw critique from agent
-    "messages": [dict],        # Message queue for chat UI
+    "stage": str,                # Current workflow stage
+    "request": dict,             # GenerationRequest data
+    "current_image_path": str,   # Path to current image (ALWAYS latest version)
+    "original_image_path": str,  # Path to original generated image (for comparison)
+    "input_images": [PIL.Image], # Input images for composition
+    "aspect_ratio": str,         # Selected aspect ratio
+    "critique": dict,            # CritiqueResult data
+    "messages": [dict],          # Message queue for chat UI
 }
 ```
+
+**Key Principles:**
+- `current_image_path` is the **single source of truth** for the latest image
+- `original_image_path` never changes after generation (used for comparisons)
+- When fixes are applied, `current_image_path` is updated to the new version
+- No conditional logic needed - always read from `current_image_path`
 
 ### State Transitions
 
@@ -604,8 +598,7 @@ Content-Type: application/json
     "pass_threshold_met": false,
     "fixes_required": [
       {
-        "region_id": "fix_1",
-        "bbox": [10, 20, 200, 150],
+        "fix_id": "fix_1",
         "severity": "high",
         "issue_description": "Sky lacks depth and vibrancy",
         "fix_prompt": "Enhance sky with deeper blues and dramatic clouds"
@@ -614,7 +607,7 @@ Content-Type: application/json
   },
   "messages": [
     {"role": "agent", "type": "critique", "score": 7.5, "assessment": "...", "passed": false},
-    {"role": "agent", "type": "image", "url": "/outputs/01_annotated.png", "caption": "Issues annotated"},
+    {"role": "agent", "type": "image", "url": "/outputs/01_annotated.png", "caption": "Current image"},
     {"role": "agent", "type": "checklist", "prompt": "Select which fixes to apply:", "items": [...], "allowRecritique": true}
   ]
 }
@@ -673,7 +666,7 @@ Content-Type: application/json
     {"role": "agent", "type": "thinking", "content": "Running vision critique on the current image..."},
     {"role": "agent", "type": "image", "url": "/outputs/fixes_applied.png", "caption": "Current image"},
     {"role": "agent", "type": "critique", "score": 8.7, "assessment": "...", "passed": true},
-    {"role": "agent", "type": "image", "url": "/outputs/01_annotated.png", "caption": "Issues annotated"},
+    {"role": "agent", "type": "image", "url": "/outputs/01_annotated.png", "caption": "Current image"},
     {"role": "agent", "type": "checklist", "prompt": "No issues found! You can finalize the image:", "items": [], "allowRecritique": true}
   ]
 }
