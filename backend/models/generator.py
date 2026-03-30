@@ -55,7 +55,7 @@ class GeneratorModel:
         image_bytes = response.candidates[0].content.parts[0].inline_data.data
         return Image.open(io.BytesIO(image_bytes))
 
-    def inpaint(self, image: Image.Image, mask: Image.Image, prompt: str) -> Image.Image:
+    def inpaint(self, image: Image.Image, mask: Image.Image, prompt: str, aspect_ratio: str = "1:1") -> Image.Image:
         # Encode base image and mask as PNG bytes
         # Send both to the model with the fix prompt
         # Use the editing/inpainting capability of gemini-3-pro-image-preview
@@ -63,7 +63,7 @@ class GeneratorModel:
 
         config = types.GenerateContentConfig(
             image_config=types.ImageConfig(
-                aspect_ratio="1:1",  # Maintain original aspect
+                aspect_ratio=aspect_ratio,  # Use the stored aspect ratio
             ),
         )
 

@@ -6,6 +6,7 @@ from schemas import RegionalFix
 from config import config
 from PIL import Image
 import json
+import state
 
 def generate_image(prompt: str, aspect_ratio: str, tool_context: ToolContext) -> dict:
     """Generate full image. Saves to outputs/00_initial.png."""
@@ -34,7 +35,8 @@ def apply_fix(image_path: str, fix_json: str, fix_index: int, tool_context: Tool
     image = Image.open(image_path)
     fix = RegionalFix(**json.loads(fix_json))
     mask = create_mask(image.size, fix.bbox)
-    patched = ModelFactory.get_generator().inpaint(image, mask, fix.fix_prompt)
+    aspect_ratio = state.pipeline.get("aspect_ratio", "1:1")
+    patched = ModelFactory.get_generator().inpaint(image, mask, fix.fix_prompt, aspect_ratio)
     patch = crop_region(patched, fix.bbox)
     orig_path  = str(config.OUTPUT_DIR / f"fix_{fix_index}_original.png")
     patch_path = str(config.OUTPUT_DIR / f"fix_{fix_index}_patch.png")
@@ -76,10 +78,12 @@ def apply_all_fixes(image_path: str, fixes_json: str, tool_context: ToolContext)
     combined_prompt += "\n\nReturn the corrected image with all fixes applied."
 
     # Send annotated image + original image + fix instructions to generator
+    aspect_ratio = state.pipeline.get("aspect_ratio", "1:1")
     fixed_image = ModelFactory.get_generator().inpaint(
         image=annotated,  # Send annotated version so model can see what to fix
         mask=Image.new("L", image.size, 255),  # Full mask (edit entire image)
-        prompt=combined_prompt
+        prompt=combined_prompt,
+        aspect_ratio=aspect_ratio
     )
 
     # Save result

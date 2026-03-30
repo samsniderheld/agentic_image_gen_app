@@ -64,25 +64,6 @@ export default function PromptForm({ onAdvance }) {
       <form onSubmit={handleSubmit}>
         <div style={{ marginBottom: '15px' }}>
           <label style={{ display: 'block', marginBottom: '5px' }}>
-            Prompt {inputImages.length > 0 && <span style={{ fontSize: '12px', color: '#666' }}>(optional - AI will suggest composition if empty)</span>}:
-          </label>
-          <textarea
-            value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-            rows={4}
-            style={{ width: '100%', padding: '8px' }}
-            placeholder={
-              inputImages.length > 0
-                ? "Leave empty to let AI suggest a composition prompt, or describe your desired composition..."
-                : "E.g., 'A serene mountain landscape at sunset'"
-            }
-            required={inputImages.length === 0}
-            disabled={loading}
-          />
-        </div>
-
-        <div style={{ marginBottom: '15px' }}>
-          <label style={{ display: 'block', marginBottom: '5px' }}>
             Input Images (optional - for composition):
           </label>
           <input
@@ -133,7 +114,7 @@ export default function PromptForm({ onAdvance }) {
           <select
             value={aspectRatio}
             onChange={(e) => setAspectRatio(e.target.value)}
-            style={{ padding: '8px' }}
+            style={{ padding: '8px', width: '200px' }}
             disabled={loading}
           >
             <option value="1:1">1:1 (Square)</option>
@@ -144,12 +125,31 @@ export default function PromptForm({ onAdvance }) {
         </div>
 
         <div style={{ marginBottom: '15px' }}>
+          <label style={{ display: 'block', marginBottom: '5px' }}>
+            Prompt {inputImages.length > 0 && <span style={{ fontSize: '12px', color: '#666' }}>(optional - AI will suggest composition if empty)</span>}:
+          </label>
+          <textarea
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+            rows={4}
+            style={{ width: '100%', padding: '8px' }}
+            placeholder={
+              inputImages.length > 0
+                ? "Leave empty to let AI suggest a composition prompt, or describe your desired composition..."
+                : "E.g., 'A serene mountain landscape at sunset'"
+            }
+            required={inputImages.length === 0}
+            disabled={loading}
+          />
+        </div>
+
+        <div style={{ marginBottom: '15px' }}>
           <label style={{ display: 'block', marginBottom: '5px' }}>Seed (optional):</label>
           <input
             type="number"
             value={seed}
             onChange={(e) => setSeed(e.target.value)}
-            style={{ padding: '8px' }}
+            style={{ padding: '8px', width: '200px' }}
             disabled={loading}
           />
         </div>
