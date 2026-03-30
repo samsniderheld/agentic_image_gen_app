@@ -59,6 +59,9 @@ Evaluate:
 1. How well the prompt is fulfilled
 2. How well each input image is integrated (seamlessness, consistency, natural blending)
 3. Any visual issues or artifacts
+4. Does this image look AI generated
+5. Do the faces match the input images
+6. Do the products look real.
 
 Return ONLY valid JSON — no markdown, no explanation:
 {{
