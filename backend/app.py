@@ -2,7 +2,7 @@ from flask import Flask, jsonify, request, send_from_directory, send_file
 from flask_cors import CORS
 from config import config
 import state, agent
-from schemas import GenerationRequest, RegionalFix
+from schemas import GenerationRequest, Fix
 import json
 from pathlib import Path
 
@@ -68,7 +68,8 @@ def generate():
     image = generator.generate(req.prompt, req.aspect_ratio, input_images=input_images or None)
     path = str(config.OUTPUT_DIR / "00_initial.png")
     image.save(path)
-    state.pipeline["image_path"] = path
+    state.pipeline["current_image_path"] = path
+    state.pipeline["original_image_path"] = path  # Save original for comparison
 
     state.push_message({"role": "agent", "type": "text",
         "content": "Done! Here's your initial generation:"})
@@ -110,81 +111,48 @@ def review_initial():
         return jsonify({"stage": "awaiting_edit",
                         "messages": state.pipeline["messages"][-3:]})
 
-    # accept → critique
-    state.push_message({"role": "user", "type": "text", "content": "Looks good, critique it."})
-    state.push_message({"role": "agent", "type": "thinking",
-        "content": "Running vision critique against the original prompt..."})
+    # accept → run critique
+    return run_critique(is_recritique=False)
 
-    agent.run_adk_segment(
-        agent_yaml="critique_agent",
-        input_message="Critique the current image.",
-        state_in={"image_path": state.pipeline["image_path"],
-                  "prompt": state.pipeline["request"]["prompt"]},
-        state_out_keys=["critique_json"]
-    )
+# ── Critique (Unified endpoint for initial + re-critique) ─────────
 
-    critique = state.pipeline["critique_json"]
-    state.pipeline["critique"] = critique
-    passed = critique["pass_threshold_met"]
+@app.post("/api/critique")
+def critique():
+    """Run critique on current image. Handles both initial critique and re-critique."""
+    is_recritique = request.json.get("is_recritique", False)
+    return run_critique(is_recritique)
 
-    state.push_message({"role": "agent", "type": "critique",
-        "score":      critique["overall_score"],
-        "assessment": critique["overall_assessment"],
-        "passed":     passed})
-    state.push_message({"role": "agent", "type": "image",
-        "url": "/outputs/01_annotated.png", "caption": "Issues annotated"})
+def run_critique(is_recritique=False):
+    """Internal function to run critique logic."""
+    import os
 
-    # Always show checklist, even if passed
-    if critique["fixes_required"]:
-        prompt_text = "Select which fixes to apply (or skip all to finalize):"
-    else:
-        prompt_text = "No issues found! You can finalize the image:"
-
-    state.push_message({"role": "agent", "type": "checklist",
-        "prompt": prompt_text,
-        "items": [{"id":       f["region_id"],
-                    "label":    f["issue_description"],
-                    "severity": f["severity"],
-                    "checked":  f["severity"] in ("high", "medium")}
-                  for f in critique["fixes_required"]],
-        "action": "apply_fixes",
-        "allowRecritique": True})
-    state.pipeline["stage"] = "awaiting_fix_review"
-
-    new_msgs = state.pipeline["messages"][-10:]
-    return jsonify({"stage": state.pipeline["stage"],
-                    "critique": critique,
-                    "messages": new_msgs})
-
-# ── Re-run Critique ───────────────────────────────────────────────
-
-@app.post("/api/recritique")
-def recritique():
-    """Re-run critique on the current image (useful after applying custom fixes or manual edits)."""
-    # Use the fixed image if available, otherwise use the original
-    current_image_path = state.pipeline.get("fixed_image_path") or state.pipeline.get("image_path")
+    # Always use current_image_path - it's the single source of truth
+    current_image_path = state.pipeline.get("current_image_path")
 
     if not current_image_path:
         return jsonify({"error": "No image to critique"}), 400
 
-    # Update the image_path to the current version so subsequent fixes apply to it
-    if state.pipeline.get("fixed_image_path"):
-        state.pipeline["image_path"] = state.pipeline["fixed_image_path"]
-        # Determine which output file to show
-        import os
-        filename = os.path.basename(current_image_path)
-        display_url = f"/outputs/{filename}"
+    # Determine display URL from the current path
+    filename = os.path.basename(current_image_path)
+    display_url = f"/outputs/{filename}"
+
+    # User message and thinking text
+    if is_recritique:
+        state.push_message({"role": "user", "type": "text", "content": "Run critique again."})
+        thinking_msg = "Running vision critique on the current image..."
     else:
-        display_url = "/outputs/00_initial.png"
+        state.push_message({"role": "user", "type": "text", "content": "Looks good, critique it."})
+        thinking_msg = "Running vision critique against the original prompt..."
 
-    state.push_message({"role": "user", "type": "text", "content": "Run critique again."})
-    state.push_message({"role": "agent", "type": "thinking",
-        "content": "Running vision critique on the current image..."})
+    # Push thinking message
+    state.push_message({"role": "agent", "type": "thinking", "content": thinking_msg})
 
-    # Show the current image being critiqued
-    state.push_message({"role": "agent", "type": "image",
-        "url": display_url, "caption": "Current image"})
+    # Show the current image being critiqued (for re-critique, show which version)
+    if is_recritique:
+        state.push_message({"role": "agent", "type": "image",
+            "url": display_url, "caption": "Current image"})
 
+    # Run the critique agent
     agent.run_adk_segment(
         agent_yaml="critique_agent",
         input_message="Critique the current image.",
@@ -197,16 +165,17 @@ def recritique():
     state.pipeline["critique"] = critique
     passed = critique["pass_threshold_met"]
 
+    # Push critique result
     state.push_message({"role": "agent", "type": "critique",
         "score":      critique["overall_score"],
         "assessment": critique["overall_assessment"],
         "passed":     passed})
 
-    # Show the annotated image with issues marked
+    # Show annotated image
     state.push_message({"role": "agent", "type": "image",
         "url": "/outputs/01_annotated.png", "caption": "Issues annotated"})
 
-    # Show checklist with new critique results
+    # Show checklist with fixes
     if critique["fixes_required"]:
         prompt_text = "Select which fixes to apply (or skip all to finalize):"
     else:
@@ -214,7 +183,7 @@ def recritique():
 
     state.push_message({"role": "agent", "type": "checklist",
         "prompt": prompt_text,
-        "items": [{"id":       f["region_id"],
+        "items": [{"id":       f["fix_id"],
                     "label":    f["issue_description"],
                     "severity": f["severity"],
                     "checked":  f["severity"] in ("high", "medium")}
@@ -238,15 +207,14 @@ def review_fixes():
 
     # Get AI-detected fixes that were selected
     approved = [f for f in state.pipeline["critique"]["fixes_required"]
-                if f["region_id"] in approved_ids]
+                if f["fix_id"] in approved_ids]
 
     # Add custom fixes to the approved list
     for custom in custom_fixes_data:
         if custom["id"] in approved_ids:
             # Create a fix object that matches the expected structure
             approved.append({
-                "region_id": custom["id"],
-                "bbox": [0, 0, 100, 100],  # Full image
+                "fix_id": custom["id"],
                 "severity": custom.get("severity", "medium"),
                 "issue_description": "Custom user-requested change",
                 "fix_prompt": custom["label"]
@@ -257,7 +225,7 @@ def review_fixes():
 
     if not approved:
         from PIL import Image
-        Image.open(state.pipeline["image_path"]).save(OUT / "final.png")
+        Image.open(state.pipeline["current_image_path"]).save(OUT / "final.png")
         state.push_message({"role": "agent", "type": "text",
             "content": "No fixes selected. Here's your final image:"})
         state.push_message({"role": "agent", "type": "final",
@@ -278,15 +246,19 @@ def review_fixes():
         actions = Actions()
 
     result = TOOL_REGISTRY["apply_all_fixes"](
-        image_path=state.pipeline["image_path"],
+        image_path=state.pipeline["current_image_path"],
         fixes_json=json.dumps(approved),
         tool_context=MockToolContext()
     )
 
-    # Show before/after comparison
+    # Update current_image_path to the fixed version
+    state.pipeline["current_image_path"] = result["fixed_image_path"]
+
+    # Show before/after comparison (use original vs current)
+    import os
     state.push_message({"role": "agent", "type": "comparison",
-        "leftUrl":  "/outputs/00_initial.png",
-        "rightUrl": "/outputs/fixes_applied.png",
+        "leftUrl":  f"/outputs/{os.path.basename(state.pipeline['original_image_path'])}",
+        "rightUrl": f"/outputs/{os.path.basename(state.pipeline['current_image_path'])}",
         "caption":  f"Applied {len(approved)} fix(es)"})
 
     # Offer to accept or reject
@@ -299,7 +271,6 @@ def review_fixes():
         ]})
 
     state.pipeline["stage"] = "awaiting_fixes_review"
-    state.pipeline["fixed_image_path"] = result["fixed_image_path"]
     return jsonify({"stage": "awaiting_fixes_review",
                     "messages": state.pipeline["messages"][-4:]})
 
@@ -308,18 +279,19 @@ def review_fixes():
 @app.post("/api/fix/accept")
 def accept_fix():
     accepted = request.json["accepted"]
+    from PIL import Image
 
     if accepted:
-        # Use the fixed image as final
-        from PIL import Image
-        fixed_image = Image.open(state.pipeline["fixed_image_path"])
-        fixed_image.save(OUT / "final.png")
+        # Use the current image (with fixes) as final
+        current_image = Image.open(state.pipeline["current_image_path"])
+        current_image.save(OUT / "final.png")
         state.push_message({"role": "agent", "type": "text",
             "content": "All fixes accepted! Here's your final image:"})
     else:
-        # Keep the original image
-        from PIL import Image
-        Image.open(state.pipeline["image_path"]).save(OUT / "final.png")
+        # Revert to original image and update current_image_path
+        original_image = Image.open(state.pipeline["original_image_path"])
+        original_image.save(OUT / "final.png")
+        state.pipeline["current_image_path"] = state.pipeline["original_image_path"]
         state.push_message({"role": "agent", "type": "text",
             "content": "Fixes rejected. Keeping the original image:"})
 

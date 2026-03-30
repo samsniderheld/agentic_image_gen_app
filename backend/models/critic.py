@@ -44,7 +44,6 @@ Return ONLY a clear, actionable composition prompt (1-2 sentences) that describe
         return response.text.strip()
 
     def critique(self, image: Image.Image, original_prompt: str, input_images: Optional[List[Image.Image]] = None) -> CritiqueResult:
-        w, h = image.size
         buf = io.BytesIO()
         image.save(buf, format="PNG")
         image_data = base64.b64encode(buf.getvalue()).decode()
@@ -61,7 +60,7 @@ Evaluate:
 3. Any visual issues or artifacts
 4. Does this image look AI generated
 5. Do the faces match the input images
-6. Do the products look real.
+6. Do the products look real
 
 Return ONLY valid JSON — no markdown, no explanation:
 {{
@@ -69,11 +68,10 @@ Return ONLY valid JSON — no markdown, no explanation:
   "overall_assessment": <string>,
   "fixes_required": [
     {{
-      "region_id": <string e.g. "fix_0">,
-      "bbox": [x1, y1, x2, y2],
+      "fix_id": <string e.g. "fix_0">,
       "severity": <"low"|"medium"|"high">,
       "issue_description": <string>,
-      "fix_prompt": <string describing the DESIRED result>
+      "fix_prompt": <string describing the DESIRED result for the entire image>
     }}
   ],
   "pass_threshold_met": <true if score >= 0.8>,
@@ -85,7 +83,7 @@ Return ONLY valid JSON — no markdown, no explanation:
     }}
   ]
 }}
-Bounding boxes must be pixel coordinates within {w}x{h}.
+Each fix applies to the ENTIRE image, not regions.
 Only include fixes for genuine issues. Return an empty array if none.
 Provide integration_score for each of the {num_inputs} input images."""
         else:
@@ -96,17 +94,16 @@ Return ONLY valid JSON — no markdown, no explanation:
   "overall_assessment": <string>,
   "fixes_required": [
     {{
-      "region_id": <string e.g. "fix_0">,
-      "bbox": [x1, y1, x2, y2],
+      "fix_id": <string e.g. "fix_0">,
       "severity": <"low"|"medium"|"high">,
       "issue_description": <string>,
-      "fix_prompt": <string describing the DESIRED result>
+      "fix_prompt": <string describing the DESIRED result for the entire image>
     }}
   ],
   "pass_threshold_met": <true if score >= 0.8>,
   "image_integrations": []
 }}
-Bounding boxes must be pixel coordinates within {w}x{h}.
+Each fix applies to the ENTIRE image, not regions.
 Only include fixes for genuine issues. Return an empty array if none."""
 
         # Build content with generated image and optionally input images for reference

@@ -3,21 +3,20 @@ from PIL import Image
 pipeline = {
     "stage":               "idle",
     "request":             None,
-    "current_image":       None,   # PIL.Image — never serialized
+    "current_image_path":  None,   # Path to current image (always the latest version)
+    "original_image_path": None,   # Path to original generated image (for comparison)
     "input_images":        [],     # List[PIL.Image] - input images for composition
     "aspect_ratio":        "1:1",  # Store aspect ratio for consistent generation
     "critique":            None,
-    "approved_fixes":      [],
-    "pending_fix_index":   0,
-    "last_patch":          None,   # PIL.Image
     "messages":            [],     # chat message dicts appended by routes
 }
 
 def reset():
     pipeline.update({
-        "stage": "idle", "request": None, "current_image": None,
-        "input_images": [], "aspect_ratio": "1:1", "critique": None, "approved_fixes": [],
-        "pending_fix_index": 0, "last_patch": None, "messages": [],
+        "stage": "idle", "request": None,
+        "current_image_path": None, "original_image_path": None,
+        "input_images": [], "aspect_ratio": "1:1", "critique": None,
+        "messages": [],
     })
 
 def push_message(msg: dict):

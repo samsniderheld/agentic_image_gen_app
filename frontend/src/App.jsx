@@ -114,7 +114,7 @@ export default function App() {
 
   const handleRecritique = async () => {
     setStage("running_critique");
-    const res = await api.recritique();
+    const res = await api.critique(true);  // true = is_recritique
     setStage(res.stage);
     append(res.messages);
   };

@@ -7,7 +7,7 @@ A conversational agentic image pipeline with Flask backend and React frontend. T
 - **Text-to-Image Generation**: Generate images from text prompts using Gemini 3 Pro Image Preview
 - **Multi-Image Composition**: Combine multiple input images (face composition, style blending, element extraction)
 - **AI Prompt Inference**: Upload images without text and let AI suggest a composition prompt
-- **AI-Powered Critique**: Automatic vision critique with regional issue detection
+- **AI-Powered Critique**: Automatic vision critique with full-image issue detection
 - **Custom Fixes**: Add unlimited custom fix descriptions alongside AI-detected issues
 - **Re-run Critique**: Run critique multiple times at any point in the workflow
 - **Aspect Ratio Preservation**: Maintains selected aspect ratio throughout fix pipeline
@@ -28,7 +28,8 @@ A conversational agentic image pipeline with Flask backend and React frontend. T
 - **Factory Pattern**: Singleton model instantiation via `ModelFactory`
 - **Agent Pattern**: ADK-based agents for critique and fix workflows
 - **Message-Based UI**: Chat bubbles render different message types (text, image, options, checklist, etc.)
-- **State Management**: Global pipeline state with PIL Image objects
+- **Simplified State Management**: Single source of truth with `current_image_path` and `original_image_path`
+- **Full-Image Fixes**: All fixes apply to entire image using inpainting, no regional bounding boxes
 
 ## Project Structure
 
@@ -45,8 +46,7 @@ agentic_image_gen_app/
 │   │   ├── generator.py          # Image generation + inpainting
 │   │   └── critic.py             # Vision critique + prompt inference
 │   ├── pipeline/
-│   │   ├── tools.py              # ADK tools (generate, critique, apply_fix, etc.)
-│   │   └── composer.py           # Image utilities (crop, mask, annotate)
+│   │   └── tools.py              # ADK tools (generate, critique, apply_all_fixes)
 │   ├── agents/
 │   │   ├── critique_agent.yaml   # ADK agent for running critique
 │   │   ├── fix_loop.yaml         # ADK agent for applying fixes
@@ -180,13 +180,13 @@ Visit `http://localhost:5173` for development with hot module replacement.
 - AI automatically critiques the image against the prompt
 - View:
   - **Critique score** and assessment
-  - **Annotated image** with bounding boxes around issues
+  - **Current image** being evaluated
   - **Checklist** of detected fixes (HIGH, MEDIUM, LOW severity)
 - Actions:
-  - **Select AI-detected fixes** to apply
+  - **Select AI-detected fixes** to apply (fixes apply to entire image)
   - **+ Add Custom Fix**: Add your own fix descriptions
   - **🔄 Run Critique Again**: Re-run critique on current image
-  - **Apply Selected Fixes**: Apply all checked fixes at once
+  - **Apply Selected Fixes**: Apply all checked fixes at once using full-image inpainting
 
 ### 5. Fix Review
 - View before/after comparison
@@ -217,8 +217,8 @@ User Input → Generation → Critique → Fix Selection → Apply Fixes → Rev
 - `GET /api/status` - Get current pipeline stage
 - `POST /api/generate` - Generate new image (text + optional images)
 - `POST /api/review/initial` - Accept/reject/edit initial image
-- `POST /api/recritique` - Re-run critique on current image
-- `POST /api/review/fixes` - Apply selected fixes (AI + custom)
+- `POST /api/critique` - Run critique on current image (initial or re-critique)
+- `POST /api/review/fixes` - Apply selected fixes (AI + custom) to entire image
 - `POST /api/fix/accept` - Accept or reject applied fixes
 
 ### Static Assets

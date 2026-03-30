@@ -7,9 +7,8 @@ class GenerationRequest(BaseModel):
     seed: Optional[int] = None
     input_image_paths: List[str] = []  # Paths to input images for composition
 
-class RegionalFix(BaseModel):
-    region_id: str
-    bbox: Tuple[int, int, int, int]        # (x1, y1, x2, y2) pixels
+class Fix(BaseModel):
+    fix_id: str
     severity: Literal["low", "medium", "high"]
     issue_description: str
     fix_prompt: str
@@ -22,6 +21,6 @@ class ImageIntegration(BaseModel):
 class CritiqueResult(BaseModel):
     overall_score: float                   # 0.0 – 1.0
     overall_assessment: str
-    fixes_required: List[RegionalFix]
+    fixes_required: List[Fix]
     pass_threshold_met: bool               # True if score >= 0.8
     image_integrations: List[ImageIntegration] = []  # How well each input image is integrated
