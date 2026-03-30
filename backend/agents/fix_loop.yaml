@@ -1,0 +1,26 @@
+name: FixRefinementLoop
+type: sequential
+description: Applies one approved fix per loop iteration until all fixes are exhausted.
+sub_agents:
+  - name: FixerAgent
+    type: llm
+    model: gemini-2.0-flash
+    description: Applies the current fix or exits if fixes are exhausted.
+    instruction: |
+      The current image path is in state key 'image_path'.
+      The current fix JSON is in state key 'current_fix'.
+      The fix index is in state key 'fix_index'.
+      If state key 'fixes_exhausted' is true, call exit_loop immediately.
+      Otherwise call apply_fix with image_path, current_fix, and fix_index.
+      Do not output any explanation.
+    output_key: image_path
+    tools:
+      - apply_fix
+      - exit_loop
+    include_contents: none
+
+  - name: FixLoopController
+    type: loop
+    max_iterations: 5
+    sub_agents:
+      - FixerAgent

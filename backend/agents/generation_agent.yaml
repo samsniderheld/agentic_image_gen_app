@@ -1,0 +1,13 @@
+name: GenerationAgent
+type: llm
+model: gemini-2.0-flash
+description: Generates an image from a user prompt using the image generation tool.
+instruction: |
+  The user's prompt is in state key 'prompt'.
+  The aspect ratio is in state key 'aspect_ratio'.
+  Call the generate_image tool with these values exactly.
+  Do not output any explanation — just call the tool.
+output_key: image_path
+tools:
+  - generate_image
+include_contents: none

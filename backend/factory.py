@@ -22,3 +22,9 @@ class ModelFactory:
                 model_name="gemini-3-flash-preview"
             )
         return cls._instances["critic"]
+
+    @classmethod
+    def get_adk_runner(cls, agent_yaml: str):
+        from agent_loader import load_agent
+        from google.adk.runners import InMemoryRunner
+        return InMemoryRunner(agent=load_agent(agent_yaml), app_name="image_gen_app")
