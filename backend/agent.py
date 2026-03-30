@@ -1,40 +1,114 @@
-from factory import ModelFactory
-from pipeline.composer import crop_region, create_mask, recomposite, annotate_bboxes
-from schemas import GenerationRequest, CritiqueResult, RegionalFix
-from pathlib import Path
-from PIL import Image
-from typing import List
+import asyncio
+from google.adk.runners import InMemoryRunner
+from google.genai import types
+from agent_loader import load_agent
+import state
 
-def step_generate(request: GenerationRequest, out_dir: Path, input_images: List[Image.Image] = None) -> Image.Image:
-    # Generate image with optional input images for composition
-    image = ModelFactory.get_generator().generate(
-        request.prompt,
-        request.aspect_ratio,
-        input_images=input_images
+APP_NAME = "image_gen_app"
+USER_ID  = "local_user"
+
+# Simple direct tool calling for now (can switch to full ADK later)
+USE_DIRECT_TOOLS = True
+
+def run_adk_segment(agent_yaml: str, input_message: str, state_in: dict, state_out_keys: list):
+    """
+    Synchronously run an ADK agent.
+    - agent_yaml:     filename in agents/ without .yaml
+    - input_message:  user turn text sent to agent
+    - state_in:       keys seeded into session.state before run
+    - state_out_keys: keys read back into state.pipeline after run
+    """
+    if USE_DIRECT_TOOLS:
+        # Simplified direct tool calling
+        _run_direct(agent_yaml, state_in, state_out_keys)
+    else:
+        try:
+            asyncio.run(_run(agent_yaml, input_message, state_in, state_out_keys))
+        except Exception as e:
+            print(f"❌ ADK agent error: {e}")
+            import traceback
+            traceback.print_exc()
+            raise
+
+def _run_direct(agent_yaml: str, state_in: dict, state_out_keys: list):
+    """Direct tool calling without ADK complexity."""
+    from pipeline.tools import TOOL_REGISTRY
+
+    print(f"🔧 Direct tool call: {agent_yaml}")
+
+    # Mock tool context
+    class MockToolContext:
+        class Actions:
+            escalate = False
+        actions = Actions()
+
+    tool_context = MockToolContext()
+
+    if agent_yaml == "generation_agent":
+        result = TOOL_REGISTRY["generate_image"](
+            prompt=state_in["prompt"],
+            aspect_ratio=state_in["aspect_ratio"],
+            tool_context=tool_context
+        )
+        for key in state_out_keys:
+            if key in result:
+                state.pipeline[key] = result[key]
+                print(f"   ✅ Set {key}: {result[key]}")
+
+    elif agent_yaml == "critique_agent":
+        result = TOOL_REGISTRY["critique_image"](
+            image_path=state_in["image_path"],
+            prompt=state_in["prompt"],
+            tool_context=tool_context
+        )
+        # critique_image returns the full critique dict, store it under the expected key
+        if "critique_json" in state_out_keys:
+            state.pipeline["critique_json"] = result
+            print(f"   ✅ Set critique_json")
+
+    elif agent_yaml == "fix_loop":
+        if not state_in.get("fixes_exhausted", False):
+            result = TOOL_REGISTRY["apply_fix"](
+                image_path=state_in["image_path"],
+                fix_json=state_in["current_fix"],
+                fix_index=state_in["fix_index"],
+                tool_context=tool_context
+            )
+            for key in state_out_keys:
+                if key in result:
+                    state.pipeline[key] = result[key]
+                    print(f"   ✅ Set {key}: {result[key]}")
+        else:
+            TOOL_REGISTRY["exit_loop"](tool_context=tool_context)
+
+async def _run(agent_yaml, input_message, state_in, state_out_keys):
+    print(f"🤖 Running ADK agent: {agent_yaml}")
+    print(f"   Input: {input_message}")
+    print(f"   State in: {state_in}")
+
+    agent   = load_agent(agent_yaml)
+    print(f"   Agent loaded: {agent.name}")
+
+    runner  = InMemoryRunner(agent=agent, app_name=APP_NAME)
+    session = await runner.session_service.create_session(
+        app_name=APP_NAME, user_id=USER_ID, state=state_in
     )
-    image.save(out_dir / "00_initial.png")
+    print(f"   Session created: {session.id}")
 
-    # Save input images for reference if provided
-    if input_images and len(input_images) > 0:
-        for idx, inp_img in enumerate(input_images):
-            inp_img.save(out_dir / f"input_{idx}.png")
+    content = types.Content(role="user", parts=[types.Part(text=input_message)])
 
-    return image
+    print(f"   Running agent...")
+    async for event in runner.run_async(user_id=USER_ID, session_id=session.id, new_message=content):
+        print(f"   📨 Event: {event}")
 
-def step_critique(image: Image.Image, prompt: str, out_dir: Path, input_images: List[Image.Image] = None) -> CritiqueResult:
-    # Critique with awareness of input images
-    result = ModelFactory.get_critic().critique(image, prompt, input_images=input_images)
-    annotate_bboxes(image, result.fixes_required).save(out_dir / "01_annotated.png")
-    return result
+    final = await runner.session_service.get_session(
+        app_name=APP_NAME, user_id=USER_ID, session_id=session.id
+    )
+    print(f"   Final state keys: {list(final.state.keys())}")
 
-def step_apply_fix(image: Image.Image, fix: RegionalFix, out_dir: Path, idx: int) -> Image.Image:
-    mask = create_mask(image.size, fix.bbox)
-    patch = crop_region(ModelFactory.get_generator().inpaint(image, mask, fix.fix_prompt), fix.bbox)
-    crop_region(image, fix.bbox).save(out_dir / f"fix_{idx}_original.png")
-    patch.save(out_dir / f"fix_{idx}_patch.png")
-    return patch
-
-def step_accept_fix(image: Image.Image, patch: Image.Image, fix: RegionalFix, out_dir: Path, idx: int) -> Image.Image:
-    result = recomposite(image, patch, fix.bbox)
-    result.save(out_dir / f"fix_{idx}_composited.png")
-    return result
+    for key in state_out_keys:
+        if key in final.state:
+            state.pipeline[key] = final.state[key]
+            print(f"   ✅ Copied {key}: {final.state[key]}")
+        else:
+            print(f"   ⚠️  Missing expected key: {key}")
