@@ -110,81 +110,58 @@ def review_initial():
         return jsonify({"stage": "awaiting_edit",
                         "messages": state.pipeline["messages"][-3:]})
 
-    # accept → critique
-    state.push_message({"role": "user", "type": "text", "content": "Looks good, critique it."})
-    state.push_message({"role": "agent", "type": "thinking",
-        "content": "Running vision critique against the original prompt..."})
+    # accept → run critique
+    return run_critique(is_recritique=False)
 
-    agent.run_adk_segment(
-        agent_yaml="critique_agent",
-        input_message="Critique the current image.",
-        state_in={"image_path": state.pipeline["image_path"],
-                  "prompt": state.pipeline["request"]["prompt"]},
-        state_out_keys=["critique_json"]
-    )
+# ── Critique (Unified endpoint for initial + re-critique) ─────────
 
-    critique = state.pipeline["critique_json"]
-    state.pipeline["critique"] = critique
-    passed = critique["pass_threshold_met"]
+@app.post("/api/critique")
+def critique():
+    """Run critique on current image. Handles both initial critique and re-critique."""
+    is_recritique = request.json.get("is_recritique", False)
+    return run_critique(is_recritique)
 
-    state.push_message({"role": "agent", "type": "critique",
-        "score":      critique["overall_score"],
-        "assessment": critique["overall_assessment"],
-        "passed":     passed})
-    state.push_message({"role": "agent", "type": "image",
-        "url": "/outputs/01_annotated.png", "caption": "Issues annotated"})
+def run_critique(is_recritique=False):
+    """Internal function to run critique logic."""
+    import os
 
-    # Always show checklist, even if passed
-    if critique["fixes_required"]:
-        prompt_text = "Select which fixes to apply (or skip all to finalize):"
+    # Determine which image to critique
+    if is_recritique:
+        # Use the fixed image if available, otherwise use the original
+        current_image_path = state.pipeline.get("fixed_image_path") or state.pipeline.get("image_path")
+
+        if not current_image_path:
+            return jsonify({"error": "No image to critique"}), 400
+
+        # Update the image_path to the current version so subsequent fixes apply to it
+        if state.pipeline.get("fixed_image_path"):
+            state.pipeline["image_path"] = state.pipeline["fixed_image_path"]
+            filename = os.path.basename(current_image_path)
+            display_url = f"/outputs/{filename}"
+        else:
+            display_url = "/outputs/00_initial.png"
+
+        # User message for re-critique
+        state.push_message({"role": "user", "type": "text", "content": "Run critique again."})
+        thinking_msg = "Running vision critique on the current image..."
     else:
-        prompt_text = "No issues found! You can finalize the image:"
-
-    state.push_message({"role": "agent", "type": "checklist",
-        "prompt": prompt_text,
-        "items": [{"id":       f["region_id"],
-                    "label":    f["issue_description"],
-                    "severity": f["severity"],
-                    "checked":  f["severity"] in ("high", "medium")}
-                  for f in critique["fixes_required"]],
-        "action": "apply_fixes",
-        "allowRecritique": True})
-    state.pipeline["stage"] = "awaiting_fix_review"
-
-    new_msgs = state.pipeline["messages"][-10:]
-    return jsonify({"stage": state.pipeline["stage"],
-                    "critique": critique,
-                    "messages": new_msgs})
-
-# ── Re-run Critique ───────────────────────────────────────────────
-
-@app.post("/api/recritique")
-def recritique():
-    """Re-run critique on the current image (useful after applying custom fixes or manual edits)."""
-    # Use the fixed image if available, otherwise use the original
-    current_image_path = state.pipeline.get("fixed_image_path") or state.pipeline.get("image_path")
-
-    if not current_image_path:
-        return jsonify({"error": "No image to critique"}), 400
-
-    # Update the image_path to the current version so subsequent fixes apply to it
-    if state.pipeline.get("fixed_image_path"):
-        state.pipeline["image_path"] = state.pipeline["fixed_image_path"]
-        # Determine which output file to show
-        import os
-        filename = os.path.basename(current_image_path)
-        display_url = f"/outputs/{filename}"
-    else:
+        # Initial critique
+        current_image_path = state.pipeline["image_path"]
         display_url = "/outputs/00_initial.png"
 
-    state.push_message({"role": "user", "type": "text", "content": "Run critique again."})
-    state.push_message({"role": "agent", "type": "thinking",
-        "content": "Running vision critique on the current image..."})
+        # User message for initial critique
+        state.push_message({"role": "user", "type": "text", "content": "Looks good, critique it."})
+        thinking_msg = "Running vision critique against the original prompt..."
 
-    # Show the current image being critiqued
-    state.push_message({"role": "agent", "type": "image",
-        "url": display_url, "caption": "Current image"})
+    # Push thinking message
+    state.push_message({"role": "agent", "type": "thinking", "content": thinking_msg})
 
+    # Show the current image being critiqued (for re-critique, show which version)
+    if is_recritique:
+        state.push_message({"role": "agent", "type": "image",
+            "url": display_url, "caption": "Current image"})
+
+    # Run the critique agent
     agent.run_adk_segment(
         agent_yaml="critique_agent",
         input_message="Critique the current image.",
@@ -197,16 +174,17 @@ def recritique():
     state.pipeline["critique"] = critique
     passed = critique["pass_threshold_met"]
 
+    # Push critique result
     state.push_message({"role": "agent", "type": "critique",
         "score":      critique["overall_score"],
         "assessment": critique["overall_assessment"],
         "passed":     passed})
 
-    # Show the annotated image with issues marked
+    # Show annotated image
     state.push_message({"role": "agent", "type": "image",
         "url": "/outputs/01_annotated.png", "caption": "Issues annotated"})
 
-    # Show checklist with new critique results
+    # Show checklist with fixes
     if critique["fixes_required"]:
         prompt_text = "Select which fixes to apply (or skip all to finalize):"
     else:
