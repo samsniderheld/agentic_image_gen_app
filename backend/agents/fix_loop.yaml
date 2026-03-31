@@ -4,7 +4,7 @@ description: Applies one approved fix per loop iteration until all fixes are exh
 sub_agents:
   - name: FixerAgent
     type: llm
-    model: gemini-2.0-flash
+    model: gemini-3.1-pro-preview
     description: Applies the current fix or exits if fixes are exhausted.
     instruction: |
       The current image path is in state key 'image_path'.

@@ -28,6 +28,8 @@ def generate():
     import base64
     import io
     from PIL import Image
+    from models.pipeline_context import PipelineContext
+    from agent import run_pre_generation, run_generator
 
     state.reset()
     data = request.json
@@ -47,26 +49,38 @@ def generate():
 
     state.pipeline.update(request=req.model_dump(), stage="generating", input_images=input_images, aspect_ratio=req.aspect_ratio)
 
-    if input_images:
-        state.push_message({"role": "agent", "type": "thinking",
-            "content": f"Composing image from {len(input_images)} input image(s) with prompt: \"{req.prompt}\"..."})
-    else:
-        state.push_message({"role": "agent", "type": "thinking",
-            "content": f"Generating with prompt: \"{req.prompt}\" at {req.aspect_ratio}..."})
+    # Show initial thinking message
+    state.push_message({"role": "agent", "type": "thinking",
+        "content": f"Starting generation pipeline for: \"{req.prompt}\""})
 
-    # Call the tool directly with input_images support
-    from pipeline.tools import TOOL_REGISTRY
-    class MockToolContext:
-        class Actions:
-            escalate = False
-        actions = Actions()
+    # Use new pipeline system
+    ctx = PipelineContext(
+        original_prompt=req.prompt,
+        aspect_ratio=req.aspect_ratio
+    )
 
-    # Generate with optional input images
-    from models.registry import get_generator
-    generator = get_generator()
-    image = generator.generate(req.prompt, req.aspect_ratio, input_images=input_images or None)
+    # Run pre-generation agents (planner, art_director, dop) with chat feedback
+    ctx = run_pre_generation(ctx, message_callback=state.push_message)
+
+    # Show enriched prompt if generated - consolidate into one message
+    pipeline_summary = []
+    if ctx.enriched_prompt:
+        pipeline_summary.append(f"**Enriched prompt:** {ctx.enriched_prompt}")
+    if ctx.style_brief:
+        pipeline_summary.append(f"**Style brief:** {ctx.style_brief}")
+    if ctx.shot_brief:
+        pipeline_summary.append(f"**Shot brief:** {ctx.shot_brief}")
+
+    if pipeline_summary:
+        state.push_message({"role": "agent", "type": "text",
+            "content": "\n\n".join(pipeline_summary)})
+
+    # Run generator with chat feedback
+    ctx = run_generator(ctx, message_callback=state.push_message)
+
+    # Save generated image
     path = str(config.OUTPUT_DIR / "00_initial.png")
-    image.save(path)
+    ctx.image.save(path)
     state.pipeline["current_image_path"] = path
     state.pipeline["original_image_path"] = path  # Save original for comparison
 
@@ -124,6 +138,9 @@ def critique():
 def run_critique(is_recritique=False):
     """Internal function to run critique logic."""
     import os
+    from PIL import Image
+    from models.pipeline_context import PipelineContext
+    from agent import run_post_generation
 
     # Always use current_image_path - it's the single source of truth
     current_image_path = state.pipeline.get("current_image_path")
@@ -135,33 +152,35 @@ def run_critique(is_recritique=False):
     filename = os.path.basename(current_image_path)
     display_url = f"/outputs/{filename}"
 
-    # User message and thinking text
+    # User message
     if is_recritique:
         state.push_message({"role": "user", "type": "text", "content": "Run critique again."})
-        thinking_msg = "Running vision critique on the current image..."
     else:
         state.push_message({"role": "user", "type": "text", "content": "Looks good, critique it."})
-        thinking_msg = "Running vision critique against the original prompt..."
-
-    # Push thinking message
-    state.push_message({"role": "agent", "type": "thinking", "content": thinking_msg})
 
     # Show the current image being critiqued (for re-critique, show which version)
     if is_recritique:
         state.push_message({"role": "agent", "type": "image",
             "url": display_url, "caption": "Current image"})
 
-    # Run the critique agent
-    agent.run_adk_segment(
-        agent_yaml="critique_agent",
-        input_message="Critique the current image.",
-        state_in={"image_path": current_image_path,
-                  "prompt": state.pipeline["request"]["prompt"]},
-        state_out_keys=["critique_json"]
+    # Use new pipeline system for critique
+    ctx = PipelineContext(
+        original_prompt=state.pipeline["request"]["prompt"],
+        aspect_ratio=state.pipeline.get("aspect_ratio", "1:1"),
+        image=Image.open(current_image_path)
     )
 
-    critique = state.pipeline["critique_json"]
-    state.pipeline["critique"] = critique
+    # Run post-generation agents (includes critic) with chat feedback
+    ctx = run_post_generation(ctx, message_callback=state.push_message)
+
+    # Extract critique from context
+    if ctx.critiques:
+        critique = ctx.critiques[0]  # Get the first (and only) critique
+        state.pipeline["critique_json"] = critique
+        state.pipeline["critique"] = critique
+    else:
+        return jsonify({"error": "No critique generated"}), 500
+
     passed = critique["pass_threshold_met"]
 
     # Push critique result

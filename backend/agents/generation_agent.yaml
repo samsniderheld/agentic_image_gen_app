@@ -1,6 +1,6 @@
 name: GenerationAgent
 type: llm
-model: gemini-2.0-flash
+model: gemini-3.1-pro-preview
 description: Generates an image from a user prompt using the image generation tool.
 instruction: |
   The user's prompt is in state key 'prompt'.
