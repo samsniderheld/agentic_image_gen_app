@@ -1,19 +1,21 @@
-# import google.generativeai as genai
 from google import genai
-
 from google.genai import types
-
 from PIL import Image
 import io
-from typing import List
+from typing import List, Optional
 
-class GeneratorModel:
+from models.base import ImageGenerator
+
+
+class GeminiGenerator(ImageGenerator):
+    """Gemini-based image generation backend."""
+
     def __init__(self, api_key: str, model_name: str):
-
         self.client = genai.Client(api_key=api_key)
         self.model_name = model_name
 
-    def generate(self, prompt: str, aspect_ratio: str = "1:1", input_images: List[Image.Image] = None) -> Image.Image:
+    def generate(self, prompt: str, aspect_ratio: str = "1:1", input_images: Optional[List[Image.Image]] = None) -> Image.Image:
+        """Generate an image from a text prompt. Returns a PIL Image."""
         # Call the model requesting image output
         # Pass aspect_ratio via generation_config
         # If input_images provided, include them in the request for composition
@@ -23,7 +25,6 @@ class GeneratorModel:
         config = types.GenerateContentConfig(
             image_config=types.ImageConfig(
                 aspect_ratio=aspect_ratio,
-                # image_size=resolution.upper(),
             ),
         )
 
@@ -56,6 +57,7 @@ class GeneratorModel:
         return Image.open(io.BytesIO(image_bytes))
 
     def inpaint(self, image: Image.Image, mask: Image.Image, prompt: str, aspect_ratio: str = "1:1") -> Image.Image:
+        """Apply fixes to an image using inpainting. Returns a PIL Image."""
         # Encode base image and mask as PNG bytes
         # Send both to the model with the fix prompt
         # Use the editing/inpainting capability of gemini-3-pro-image-preview

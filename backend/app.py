@@ -62,9 +62,8 @@ def generate():
         actions = Actions()
 
     # Generate with optional input images
-    from models.generator import GeneratorModel
-    from factory import ModelFactory
-    generator = ModelFactory.get_generator()
+    from models.registry import get_generator
+    generator = get_generator()
     image = generator.generate(req.prompt, req.aspect_ratio, input_images=input_images or None)
     path = str(config.OUTPUT_DIR / "00_initial.png")
     image.save(path)

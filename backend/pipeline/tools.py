@@ -1,6 +1,6 @@
 from google.adk.tools import FunctionTool
 from google.adk.tools.tool_context import ToolContext
-from factory import ModelFactory
+from models.registry import get_generator, get_critic
 from schemas import Fix
 from config import config
 from PIL import Image
@@ -9,7 +9,7 @@ import state
 
 def generate_image(prompt: str, aspect_ratio: str, tool_context: ToolContext) -> dict:
     """Generate full image. Saves to outputs/00_initial.png."""
-    image = ModelFactory.get_generator().generate(prompt, aspect_ratio)
+    image = get_generator().generate(prompt, aspect_ratio)
     path = str(config.OUTPUT_DIR / "00_initial.png")
     image.save(path)
     return {"image_path": path}
@@ -17,12 +17,13 @@ def generate_image(prompt: str, aspect_ratio: str, tool_context: ToolContext) ->
 def critique_image(image_path: str, prompt: str, tool_context: ToolContext) -> dict:
     """Critique image against prompt. Returns CritiqueResult as dict."""
     image = Image.open(image_path)
-    result = ModelFactory.get_critic().critique(image, prompt)
+    result = get_critic().critique(image, prompt)
 
     # Just save a copy of the image for display (no annotations needed)
     image.save(str(config.OUTPUT_DIR / "01_annotated.png"))
 
-    return result.model_dump()
+    # result is already a dict from the ABC implementation
+    return result
 
 def apply_all_fixes(image_path: str, fixes_json: str, tool_context: ToolContext) -> dict:
     """Apply all fixes to the entire image using inpainting with full mask."""
@@ -41,7 +42,7 @@ def apply_all_fixes(image_path: str, fixes_json: str, tool_context: ToolContext)
 
     # Apply fixes to entire image using inpainting with full mask
     aspect_ratio = state.pipeline.get("aspect_ratio", "1:1")
-    fixed_image = ModelFactory.get_generator().inpaint(
+    fixed_image = get_generator().inpaint(
         image=image,
         mask=Image.new("L", image.size, 255),  # Full mask (edit entire image)
         prompt=combined_prompt,
