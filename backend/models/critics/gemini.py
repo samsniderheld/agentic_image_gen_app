@@ -4,7 +4,12 @@ from schemas import CritiqueResult
 import io, base64, json
 from typing import List, Optional
 
-class CriticModel:
+from models.base import ImageCritic
+
+
+class GeminiCritic(ImageCritic):
+    """Gemini-based image critique backend."""
+
     def __init__(self, api_key: str, model_name: str):
         genai.configure(api_key=api_key)
         self.client = genai.GenerativeModel(model_name)
@@ -43,7 +48,11 @@ Return ONLY a clear, actionable composition prompt (1-2 sentences) that describe
         response = self.client.generate_content(content_parts)
         return response.text.strip()
 
-    def critique(self, image: Image.Image, original_prompt: str, input_images: Optional[List[Image.Image]] = None) -> CritiqueResult:
+    def critique(self, image: Image.Image, prompt: str, input_images: Optional[List[Image.Image]] = None) -> dict:
+        """
+        Critique a generated image against the original prompt.
+        Returns a CritiqueResult as a dict.
+        """
         buf = io.BytesIO()
         image.save(buf, format="PNG")
         image_data = base64.b64encode(buf.getvalue()).decode()
@@ -51,7 +60,7 @@ Return ONLY a clear, actionable composition prompt (1-2 sentences) that describe
         # Build the critique prompt based on whether input images were used
         if input_images and len(input_images) > 0:
             num_inputs = len(input_images)
-            prompt = f"""Analyze this generated image against the original prompt: '{original_prompt}'.
+            critique_prompt = f"""Analyze this generated image against the original prompt: '{prompt}'.
 This image was created by combining {num_inputs} input image(s).
 
 Evaluate:
@@ -87,7 +96,7 @@ Each fix applies to the ENTIRE image, not regions.
 Only include fixes for genuine issues. Return an empty array if none.
 Provide integration_score for each of the {num_inputs} input images."""
         else:
-            prompt = f"""Analyze this image against the original prompt: '{original_prompt}'.
+            critique_prompt = f"""Analyze this image against the original prompt: '{prompt}'.
 Return ONLY valid JSON — no markdown, no explanation:
 {{
   "overall_score": <float 0.0-1.0>,
@@ -119,8 +128,11 @@ Only include fixes for genuine issues. Return an empty array if none."""
 
         # Add the generated image to critique
         content_parts.append({"mime_type": "image/png", "data": image_data})
-        content_parts.append(prompt)
+        content_parts.append(critique_prompt)
 
         response = self.client.generate_content(content_parts)
         raw = response.text.strip().removeprefix("```json").removesuffix("```").strip()
-        return CritiqueResult(**json.loads(raw))
+
+        # Return CritiqueResult as dict (compatible with ABC)
+        result = CritiqueResult(**json.loads(raw))
+        return result.model_dump()
