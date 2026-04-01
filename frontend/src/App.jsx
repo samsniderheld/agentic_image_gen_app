@@ -60,7 +60,7 @@ export default function App() {
     append(res.messages);
   };
 
-  const handleOption = async (value) => {
+  const handleOption = async (value, feedback = null) => {
     // Handle aspect ratio selection
     if (["1:1", "16:9", "9:16", "4:3"].includes(value)) {
       setAspectRatio(value);
@@ -72,32 +72,55 @@ export default function App() {
       return;
     }
 
-    if (value === "accept") {
-      setStage("critiquing");
-      const res = await api.reviewInitial("accept");
+    // Handle initial image review (after generation, before critique)
+    if (stage === "awaiting_initial_review") {
+      if (value === "accept") {
+        setStage("critiquing");
+        const res = await api.critique(false); // false = initial critique
+        setStage(res.stage);
+        append(res.messages);
+        return;
+      } else if (value === "reject") {
+        setStage("idle");
+        append([{ role: "agent", type: "text", content: "Let's start over. What would you like to generate?" }]);
+        return;
+      }
+    }
+
+    // Handle fixes review (after fixes applied, before finalization)
+    if (stage === "awaiting_fixes_review") {
+      if (value === "accept_all_fixes") {
+        setStage("finalizing");
+        const res = await api.acceptFix(true);
+        setStage(res.stage);
+        append(res.messages);
+        return;
+      } else if (value === "reject_all_fixes") {
+        setStage("finalizing");
+        const res = await api.acceptFix(false);
+        setStage(res.stage);
+        append(res.messages);
+        return;
+      } else if (value === "recritique") {
+        handleRecritique();
+        return;
+      }
+    }
+
+    // Handle pipeline agent reviews with approve/feedback/reject
+    // Extract agent name from stage (e.g., "awaiting_planner_review" → "planner")
+    const agentMatch = stage.match(/^awaiting_(.+)_review$/);
+    if (agentMatch) {
+      const agentName = agentMatch[1];
+      setStage("processing");
+      const res = await api.reviewAgent(agentName, value, feedback);
       setStage(res.stage);
       append(res.messages);
-    } else if (value === "edit") {
-      setAwaitingInput("edit");
-      const res = await api.reviewInitial("edit");
-      append(res.messages);
-    } else if (value === "reject") {
-      const res = await api.reviewInitial("reject");
-      setStage("idle");
-      append(res.messages);
-    } else if (value === "accept_all_fixes") {
-      setStage("finalizing");
-      const res = await api.acceptFix(true);
-      setStage(res.stage);
-      append(res.messages);
-    } else if (value === "reject_all_fixes") {
-      setStage("finalizing");
-      const res = await api.acceptFix(false);
-      setStage(res.stage);
-      append(res.messages);
-    } else if (value === "recritique") {
-      handleRecritique();
-    } else if (value === "start_over") {
+      return;
+    }
+
+    // Handle other global actions
+    if (value === "start_over") {
       setMessages([WELCOME, ASPECT_RATIO_OPTIONS]);
       setStage("selecting_aspect_ratio");
       setAspectRatio("1:1");

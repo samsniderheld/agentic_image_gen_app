@@ -1,7 +1,12 @@
 from config import Config
-from models.base import ImageGenerator, ImageCritic
+from models.base import ImageGenerator, ImageCritic, PipelineAgent
 from models.generators.gemini import GeminiGenerator
 from models.critics.gemini import GeminiCritic
+from agents.generator_agent import GeneratorAgent
+from agents.critic_agent import CriticAgent
+from agents.planner_agent import PlannerAgent
+from agents.art_director_agent import ArtDirectorAgent
+from agents.dop_agent import DopAgent
 
 _GENERATORS: dict[str, type[ImageGenerator]] = {
     "gemini": GeminiGenerator,
@@ -11,6 +16,15 @@ _GENERATORS: dict[str, type[ImageGenerator]] = {
 _CRITICS: dict[str, type[ImageCritic]] = {
     "gemini": GeminiCritic,
     # "openai": OpenAICritic,
+}
+
+# Pipeline agent registry
+_AGENTS: dict[str, type[PipelineAgent]] = {
+    "generator":    GeneratorAgent,
+    "critic":       CriticAgent,
+    "planner":      PlannerAgent,
+    "art_director": ArtDirectorAgent,
+    "dop":          DopAgent,
 }
 
 def get_generator() -> ImageGenerator:
@@ -36,3 +50,20 @@ def get_critic() -> ImageCritic:
             model_name="gemini-3.1-pro-preview"
         )
     raise NotImplementedError(f"Backend '{key}' not fully configured")
+
+
+def build_pipeline() -> list[PipelineAgent]:
+    """
+    Instantiate agents in the order specified by Config.PIPELINE.
+    Raises ValueError for unknown agent names.
+    """
+    pipeline = []
+    for name in Config.PIPELINE:
+        name = name.strip()
+        if name not in _AGENTS:
+            raise ValueError(
+                f"Unknown agent '{name}' in PIPELINE. "
+                f"Valid options: {list(_AGENTS.keys())}"
+            )
+        pipeline.append(_AGENTS[name]())
+    return pipeline

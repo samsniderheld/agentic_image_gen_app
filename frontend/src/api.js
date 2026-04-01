@@ -7,7 +7,7 @@ const post = (path, body) =>
 
 // Every response includes { ...data, messages: [...newMessages] }
 export const generate      = (form)                 => post("/generate", form);
-export const reviewInitial = (decision, new_prompt) => post("/review/initial", { decision, new_prompt });
+export const reviewAgent   = (agent, decision, feedback) => post("/review/agent", { agent, decision, feedback });
 export const critique      = (isRecritique = false) => post("/critique", { is_recritique: isRecritique });
 export const reviewFixes   = (ids, customFixes = []) => post("/review/fixes", { approved_fix_ids: ids, custom_fixes: customFixes });
 export const acceptFix     = (accepted)             => post("/fix/accept", { accepted });

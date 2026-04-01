@@ -76,6 +76,21 @@ body { background: var(--bg); color: var(--text); font-family: system-ui, sans-s
 .option-btn:disabled { opacity: 0.45; cursor: not-allowed; }
 .option-btn.selected { background: var(--accent); border-color: var(--accent); }
 
+/* Feedback Input */
+.feedback-input { display: flex; flex-direction: column; gap: 0.5rem; }
+.feedback-input textarea { background: var(--surface2); border: 1px solid var(--border);
+  color: var(--text); border-radius: 0.5rem; padding: 0.5rem; font-family: inherit;
+  font-size: 0.9rem; resize: vertical; }
+.feedback-input textarea:focus { outline: none; border-color: var(--accent); }
+.feedback-buttons { display: flex; gap: 0.4rem; }
+.feedback-buttons button { background: var(--surface2); border: 1px solid var(--border);
+  color: var(--text); border-radius: 2rem; padding: 0.4rem 0.9rem;
+  font-size: 0.88rem; cursor: pointer; transition: background 0.15s; }
+.feedback-buttons button:hover:not(:disabled) { background: var(--accent); border-color: var(--accent); }
+.feedback-buttons button:disabled { opacity: 0.45; cursor: not-allowed; }
+.feedback-buttons button.submitting { background: var(--accent); border-color: var(--accent);
+  opacity: 0.7; cursor: wait; }
+
 /* Checklist */
 .checklist-bubble { align-self: flex-start; background: var(--surface);
   border-radius: 1rem; padding: 0.75rem; max-width: 85%; }

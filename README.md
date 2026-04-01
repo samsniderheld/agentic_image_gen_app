@@ -17,18 +17,21 @@ A conversational agentic image pipeline with Flask backend and React frontend. T
 ## Architecture
 
 ### Technology Stack
-- **Backend**: Flask + Google ADK (Agent Development Kit)
+- **Backend**: Flask + Python ABC-based agent pipeline
 - **Frontend**: React + Vite (chat-based UI with message bubbles)
 - **Image Generator**: `gemini-3-pro-image-preview`
 - **Vision Critic**: `gemini-3.1-pro-preview`
-- **Agent Framework**: `gemini-2.0-flash` for agent orchestration
+- **Agent Models**: `gemini-3.1-pro-preview` for pre-generation agents (planner, art director, DOP)
 - **Deployment**: Single server (Flask serves both API and static frontend)
 
 ### Design Patterns
-- **Factory Pattern**: Singleton model instantiation via `ModelFactory`
-- **Agent Pattern**: ADK-based agents for critique and fix workflows
+- **ABC Pattern**: Abstract base classes for extensible agent system
+- **Registry Pattern**: Agent and model registration via centralized registry
+- **Pipeline Pattern**: Sequential agent execution with context passing
+- **Human-in-the-Loop (HITL)**: Review gates between each agent with feedback loops
+- **Configuration-Driven**: Single AGENT_CONFIG dictionary drives all review workflows
 - **Message-Based UI**: Chat bubbles render different message types (text, image, options, checklist, etc.)
-- **Simplified State Management**: Single source of truth with `current_image_path` and `original_image_path`
+- **PipelineContext**: Dataclass object flows through all agents, accumulating outputs
 - **Full-Image Fixes**: All fixes apply to entire image using inpainting, no regional bounding boxes
 
 ## Project Structure
@@ -36,21 +39,27 @@ A conversational agentic image pipeline with Flask backend and React frontend. T
 ```
 agentic_image_gen_app/
 ├── backend/
-│   ├── app.py                    # Flask app + all routes
-│   ├── state.py                  # Global pipeline state + message queue
-│   ├── agent.py                  # ADK agent runner
-│   ├── factory.py                # ModelFactory (singleton pattern)
+│   ├── app.py                    # Flask app + all routes + AGENT_CONFIG
+│   ├── state.py                  # Global pipeline state + message queue + pipeline_context
+│   ├── agent.py                  # Pipeline runner functions (pre/post/generator)
 │   ├── config.py                 # Configuration + environment
 │   ├── schemas.py                # Pydantic models
 │   ├── models/
-│   │   ├── generator.py          # Image generation + inpainting
-│   │   └── critic.py             # Vision critique + prompt inference
+│   │   ├── base.py               # ABC definitions (ImageGenerator, ImageCritic, PipelineAgent)
+│   │   ├── registry.py           # Agent/model registration and factory functions
+│   │   ├── pipeline_context.py   # PipelineContext dataclass
+│   │   ├── generators/
+│   │   │   └── gemini.py         # GeminiGenerator (image generation + inpainting)
+│   │   └── critics/
+│   │       └── gemini.py         # GeminiCritic (vision critique + prompt inference)
 │   ├── pipeline/
-│   │   └── tools.py              # ADK tools (generate, critique, apply_all_fixes)
+│   │   └── tools.py              # Fix application tool (apply_all_fixes)
 │   ├── agents/
-│   │   ├── critique_agent.yaml   # ADK agent for running critique
-│   │   ├── fix_loop.yaml         # ADK agent for applying fixes
-│   │   └── generation_agent.yaml # ADK agent for generation
+│   │   ├── planner_agent.py      # Prompt enrichment agent
+│   │   ├── art_director_agent.py # Visual style definition agent
+│   │   ├── dop_agent.py          # Shot specification agent
+│   │   ├── generator_agent.py    # Image generation wrapper agent
+│   │   └── critic_agent.py       # Critique wrapper agent
 │   ├── outputs/                  # Generated images directory
 │   ├── requirements.txt
 │   └── .env.example
@@ -60,7 +69,7 @@ agentic_image_gen_app/
     ├── index.html
     └── src/
         ├── main.jsx              # React entry point
-        ├── App.jsx               # Main app with message handling
+        ├── App.jsx               # Main app with message handling + stage routing
         ├── api.js                # API client functions
         ├── styles.css            # Global styles (dark theme)
         ├── chat/
@@ -72,7 +81,7 @@ agentic_image_gen_app/
         │   ├── ThinkingBubble.jsx     # Agent thinking messages
         │   ├── ImageBubble.jsx        # Image display
         │   ├── ComparisonBubble.jsx   # Before/after comparison
-        │   ├── OptionsBubble.jsx      # Multiple choice buttons
+        │   ├── OptionsBubble.jsx      # Multiple choice buttons + feedback input
         │   ├── ChecklistBubble.jsx    # Fix selection + custom fixes
         │   ├── CritiqueBubble.jsx     # Critique score display
         │   ├── InputRequestBubble.jsx # Prompt for text input
@@ -163,21 +172,39 @@ Visit `http://localhost:5173` for development with hot module replacement.
 - Open browser to `http://localhost:8000` (or `http://localhost:5173` in dev mode)
 - Select aspect ratio (1:1, 16:9, 9:16, 4:3)
 
-### 2. Image Generation
+### 2. Prompt Planning (HITL Gate 1)
 - **Option A**: Enter text prompt
 - **Option B**: Upload multiple images (AI will infer composition prompt)
 - **Option C**: Upload images + text prompt for guided composition
 - Click "Generate Image"
-
-### 3. Initial Review
-- Review generated image
-- Options:
-  - **✓ Looks good — critique it**: Proceed to automatic AI critique
-  - **✎ Edit my prompt**: Modify prompt and regenerate
+- **Planner agent** expands your prompt into a detailed generation brief
+- Review enriched prompt:
+  - **✓ Approve**: Continue to style definition
+  - **✎ Give feedback**: Planner re-runs with your input
   - **✕ Start over**: Reset workflow
 
-### 4. Critique Review
-- AI automatically critiques the image against the prompt
+### 3. Visual Style Definition (HITL Gate 2)
+- **Art Director agent** defines the visual style (medium, color grading, texture, etc.)
+- Review style brief:
+  - **✓ Approve**: Continue to shot setup
+  - **✎ Give feedback**: Art Director revises based on your input
+  - **✕ Start over**: Reset workflow
+
+### 4. Shot Specification (HITL Gate 3)
+- **DOP agent** sets up camera angle, framing, and focal length
+- Review shot brief:
+  - **✓ Approve**: Generate image
+  - **✎ Give feedback**: DOP adjusts shot setup
+  - **✕ Start over**: Reset workflow
+
+### 5. Image Generation
+- **Generator agent** combines all briefs and generates the image
+- Review generated image:
+  - **✓ Looks good — critique it**: Proceed to automatic AI critique
+  - **✕ Start over**: Reset workflow
+
+### 6. Critique Review
+- **Critic agent** automatically critiques the image against the prompt
 - View:
   - **Critique score** and assessment
   - **Current image** being evaluated
@@ -188,14 +215,14 @@ Visit `http://localhost:5173` for development with hot module replacement.
   - **🔄 Run Critique Again**: Re-run critique on current image
   - **Apply Selected Fixes**: Apply all checked fixes at once using full-image inpainting
 
-### 5. Fix Review
+### 7. Fix Review
 - View before/after comparison
 - Options:
   - **✓ Accept & Finalize**: Save fixed image as final
   - **✕ Reject & Keep Original**: Discard fixes
   - **🔄 Run Critique Again**: Critique the fixed image and iterate
 
-### 6. Iterate or Finalize
+### 8. Iterate or Finalize
 - Can run critique → fixes → critique cycle multiple times
 - When satisfied, finalize to download
 
@@ -206,17 +233,21 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for detailed data flow diagrams.
 ### High-Level Flow
 
 ```
-User Input → Generation → Critique → Fix Selection → Apply Fixes → Review
-                ↑                                                      ↓
-                └──────────────── Re-critique Loop ────────────────────┘
+User Input → Planner (review) → Art Director (review) → DOP (review) → Generation
+    ↑            ↓                    ↓                     ↓              ↓
+    └─────── Start Over ───────────────────────────────────────────────────┘
+                                                                           ↓
+                                                    Critique → Fix Selection → Apply Fixes → Review
+                                                       ↑                                       ↓
+                                                       └────── Re-critique Loop ───────────────┘
 ```
 
 ## API Endpoints
 
 ### Core Endpoints
 - `GET /api/status` - Get current pipeline stage
-- `POST /api/generate` - Generate new image (text + optional images)
-- `POST /api/review/initial` - Accept/reject/edit initial image
+- `POST /api/generate` - Start pipeline with user prompt (runs planner agent)
+- `POST /api/review/agent` - Generic agent review endpoint (approve/feedback/reject)
 - `POST /api/critique` - Run critique on current image (initial or re-critique)
 - `POST /api/review/fixes` - Apply selected fixes (AI + custom) to entire image
 - `POST /api/fix/accept` - Accept or reject applied fixes
@@ -229,14 +260,17 @@ User Input → Generation → Critique → Fix Selection → Apply Fixes → Rev
 
 1. **selecting_aspect_ratio**: User selects image aspect ratio
 2. **idle**: Ready to accept generation request
-3. **generating**: Image generation in progress
-4. **awaiting_initial_review**: User reviews initial image
-5. **critiquing**: AI critique in progress
-6. **awaiting_fix_review**: User selects fixes (AI + custom)
-7. **applying_fixes**: Fixes being applied
-8. **awaiting_fixes_review**: User reviews applied fixes
-9. **running_critique**: Re-running critique
-10. **done**: Final image ready
+3. **running_planner**: Planner agent enriching prompt
+4. **awaiting_planner_review**: User reviews enriched prompt (approve/feedback/reject)
+5. **awaiting_art_director_review**: User reviews style brief (approve/feedback/reject)
+6. **awaiting_dop_review**: User reviews shot setup (approve/feedback/reject)
+7. **awaiting_initial_review**: User reviews generated image
+8. **critiquing**: Critic agent running
+9. **awaiting_fix_review**: User selects fixes (AI + custom)
+10. **applying_fixes**: Fixes being applied to image
+11. **awaiting_fixes_review**: User reviews applied fixes
+12. **running_critique**: Re-running critique
+13. **done**: Final image ready
 
 ## Message Types
 

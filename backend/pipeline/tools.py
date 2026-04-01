@@ -1,31 +1,11 @@
-from google.adk.tools import FunctionTool
-from google.adk.tools.tool_context import ToolContext
-from models.registry import get_generator, get_critic
+from models.registry import get_generator
 from schemas import Fix
 from config import config
 from PIL import Image
 import json
 import state
 
-def generate_image(prompt: str, aspect_ratio: str, tool_context: ToolContext) -> dict:
-    """Generate full image. Saves to outputs/00_initial.png."""
-    image = get_generator().generate(prompt, aspect_ratio)
-    path = str(config.OUTPUT_DIR / "00_initial.png")
-    image.save(path)
-    return {"image_path": path}
-
-def critique_image(image_path: str, prompt: str, tool_context: ToolContext) -> dict:
-    """Critique image against prompt. Returns CritiqueResult as dict."""
-    image = Image.open(image_path)
-    result = get_critic().critique(image, prompt)
-
-    # Just save a copy of the image for display (no annotations needed)
-    image.save(str(config.OUTPUT_DIR / "01_annotated.png"))
-
-    # result is already a dict from the ABC implementation
-    return result
-
-def apply_all_fixes(image_path: str, fixes_json: str, tool_context: ToolContext) -> dict:
+def apply_all_fixes(image_path: str, fixes_json: str, tool_context=None) -> dict:
     """Apply all fixes to the entire image using inpainting with full mask."""
     image = Image.open(image_path)
     fixes_data = json.loads(fixes_json)
@@ -55,17 +35,7 @@ def apply_all_fixes(image_path: str, fixes_json: str, tool_context: ToolContext)
 
     return {"fixed_image_path": result_path}
 
-def exit_loop(tool_context: ToolContext) -> dict:
-    """Signal LoopAgent to stop. Call when all fixes are exhausted."""
-    tool_context.actions.escalate = True
-    return {}
-
+# Registry for backwards compatibility
 TOOL_REGISTRY = {
-    "generate_image": generate_image,
-    "critique_image": critique_image,
     "apply_all_fixes": apply_all_fixes,
-    "exit_loop":      exit_loop,
 }
-
-def get_tool(name: str) -> FunctionTool:
-    return FunctionTool(TOOL_REGISTRY[name])

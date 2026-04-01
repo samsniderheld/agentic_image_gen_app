@@ -27,8 +27,8 @@ This document provides detailed architecture diagrams and data flow explanations
 │  ┌───────────────────────────────────────────────────────────┐  │
 │  │              React Frontend (Static Files)                │  │
 │  │  - Chat UI with message bubbles                           │  │
-│  │  - User input handling                                    │  │
-│  │  - Image upload/display                                   │  │
+│  │  - HITL review UI with feedback input                     │  │
+│  │  - Stage-based routing logic                              │  │
 │  └───────────────────────────────────────────────────────────┘  │
 │                             │                                    │
 │                             │ /api/* requests                    │
@@ -36,32 +36,38 @@ This document provides detailed architecture diagrams and data flow explanations
 │  ┌───────────────────────────────────────────────────────────┐  │
 │  │                   Flask API Routes                        │  │
 │  │  - /api/generate                                          │  │
-│  │  - /api/review/initial                                    │  │
+│  │  - /api/review/agent (generic HITL gate)                 │  │
 │  │  - /api/critique (unified initial + re-critique)          │  │
 │  │  - /api/review/fixes                                      │  │
 │  │  - /api/fix/accept                                        │  │
+│  │  - AGENT_CONFIG: drives all review workflows             │  │
 │  └─────────────┬─────────────────────────────────────────────┘  │
 │                │                                                 │
 │                ▼                                                 │
 │  ┌───────────────────────────────────────────────────────────┐  │
 │  │                   Global State                            │  │
 │  │  - pipeline: {stage, current_image_path,                 │  │
-│  │              original_image_path, messages, ...}          │  │
-│  │  - Simple: single source of truth for current image      │  │
+│  │              original_image_path, messages,               │  │
+│  │              pipeline_context, ...}                       │  │
+│  │  - PipelineContext flows between agents                  │  │
 │  └─────────────┬─────────────────────────────────────────────┘  │
 │                │                                                 │
 │                ▼                                                 │
 │  ┌───────────────────────────────────────────────────────────┐  │
-│  │                 ADK Agent Runner                          │  │
-│  │  - Runs YAML-defined agents                               │  │
-│  │  - Manages tool execution                                 │  │
+│  │              ABC-Based Agent Pipeline                     │  │
+│  │  - Planner: Prompt enrichment                             │  │
+│  │  - Art Director: Style definition                         │  │
+│  │  - DOP: Shot specification                                │  │
+│  │  - Generator: Image generation (wrapper)                  │  │
+│  │  - Critic: Vision critique (wrapper)                      │  │
 │  └─────────────┬─────────────────────────────────────────────┘  │
 │                │                                                 │
 │                ▼                                                 │
 │  ┌───────────────────────────────────────────────────────────┐  │
-│  │                 Model Factory                             │  │
-│  │  - Singleton GeneratorModel (gemini-3-pro-image-preview)  │  │
-│  │  - Singleton CriticModel (gemini-3.1-pro-preview)         │  │
+│  │              Model Registry & Backends                    │  │
+│  │  - GeminiGenerator (gemini-3-pro-image-preview)           │  │
+│  │  - GeminiCritic (gemini-3.1-pro-preview)                  │  │
+│  │  - Lazy loading to avoid circular imports                │  │
 │  └─────────────┬─────────────────────────────────────────────┘  │
 │                │                                                 │
 └────────────────┼─────────────────────────────────────────────────┘
@@ -71,7 +77,7 @@ This document provides detailed architecture diagrams and data flow explanations
     │   Google Gemini API    │
     │  - Image Generation    │
     │  - Vision Critique     │
-    │  - Agent Orchestration │
+    │  - LLM for Agents      │
     └────────────────────────┘
 ```
 
@@ -86,58 +92,69 @@ backend/
 │
 ├── app.py ──────────────► Flask Routes + Request Handling
 │                          │
-│                          ├─► /api/generate
-│                          ├─► /api/review/initial
-│                          ├─► /api/recritique
+│                          ├─► /api/generate (starts planner)
+│                          ├─► /api/review/agent (generic HITL gate)
+│                          ├─► /api/critique (initial + re-critique)
 │                          ├─► /api/review/fixes
-│                          └─► /api/fix/accept
+│                          ├─► /api/fix/accept
+│                          └─► AGENT_CONFIG (configuration dictionary)
 │
 ├── state.py ────────────► Global State Management
 │                          │
-│                          ├─► pipeline: dict
-│                          ├─► messages: list
-│                          ├─► push_message()
-│                          └─► reset()
+│                          ├─► pipeline: dict (stage, messages, etc.)
+│                          ├─► pipeline_context: PipelineContext
+│                          └─► push_message()
 │
-├── agent.py ────────────► ADK Agent Executor
+├── agent.py ────────────► Pipeline Runner Functions
 │                          │
-│                          └─► run_adk_segment()
+│                          ├─► get_pipeline() → builds agent pipeline
+│                          ├─► run_pre_generation(ctx) → planner/art_director/dop
+│                          ├─► run_generator(ctx) → generator
+│                          └─► run_post_generation(ctx) → critic
 │
-├── factory.py ──────────► Singleton Model Factory
+├── config.py ───────────► Configuration
 │                          │
-│                          ├─► get_generator() → GeneratorModel
-│                          └─► get_critic() → CriticModel
+│                          └─► PIPELINE = ["planner", "art_director", "dop",
+│                                         "generator", "critic"]
 │
 ├── models/
-│   ├── generator.py ────► Image Generation + Inpainting
+│   ├── base.py ─────────► ABC Definitions
 │   │                      │
-│   │                      ├─► generate(prompt, aspect_ratio, input_images)
-│   │                      └─► inpaint(image, mask, prompt, aspect_ratio)
+│   │                      ├─► ImageGenerator (ABC)
+│   │                      ├─► ImageCritic (ABC)
+│   │                      └─► PipelineAgent (ABC)
 │   │
-│   └── critic.py ───────► Vision Critique + Prompt Inference
-│                          │
-│                          ├─► critique(image, prompt, input_images)
-│                          └─► infer_composition_prompt(images)
+│   ├── registry.py ─────► Registration & Factory
+│   │                      │
+│   │                      ├─► get_generator() → GeminiGenerator
+│   │                      ├─► get_critic() → GeminiCritic
+│   │                      └─► build_pipeline() → [PipelineAgent]
+│   │
+│   ├── pipeline_context.py ──► PipelineContext dataclass
+│   │
+│   ├── generators/
+│   │   └── gemini.py ───► GeminiGenerator (generation + inpainting)
+│   │
+│   └── critics/
+│       └── gemini.py ───► GeminiCritic (critique + prompt inference)
 │
 ├── pipeline/
-│   └── tools.py ────────► ADK Tool Definitions
+│   └── tools.py ────────► Fix Application Tool
 │                          │
-│                          ├─► generate_image()
-│                          ├─► critique_image()
-│                          ├─► apply_all_fixes() [full-image inpainting]
-│                          └─► exit_loop()
+│                          └─► apply_all_fixes() [full-image inpainting]
 │
 ├── agents/
-│   ├── critique_agent.yaml ──► Runs critique_image tool
-│   ├── fix_loop.yaml ─────────► Iterates through fixes
-│   └── generation_agent.yaml ─► Runs generate_image tool
+│   ├── planner_agent.py ────────► Prompt enrichment
+│   ├── art_director_agent.py ───► Style definition
+│   ├── dop_agent.py ────────────► Shot specification
+│   ├── generator_agent.py ──────► Image generation wrapper
+│   └── critic_agent.py ─────────► Critique wrapper
 │
 └── schemas.py ──────────► Pydantic Models
                            │
                            ├─► GenerationRequest
                            ├─► CritiqueResult
-                           ├─► Fix (no bounding boxes)
-                           └─► ImageIntegration
+                           └─► Fix
 ```
 
 ### Frontend Components
@@ -148,14 +165,16 @@ frontend/src/
 ├── App.jsx ─────────────► Main Application
 │                          │
 │                          ├─► Message state management
-│                          ├─► Event handlers (handleOption, handleChecklist, handleRecritique)
-│                          └─► Stage tracking
+│                          ├─► Stage-based routing (awaiting_*_review)
+│                          ├─► handleOption (approve/feedback/reject)
+│                          ├─► handleChecklist (fix selection)
+│                          └─► handleRecritique
 │
 ├── api.js ──────────────► API Client
 │                          │
 │                          ├─► generate(form)
-│                          ├─► reviewInitial(decision, new_prompt)
-│                          ├─► recritique()
+│                          ├─► reviewAgent(agent, decision, feedback)
+│                          ├─► critique(isRecritique)
 │                          ├─► reviewFixes(ids, customFixes)
 │                          └─► acceptFix(accepted)
 │
@@ -169,7 +188,7 @@ frontend/src/
 │   ├── ThinkingBubble.jsx ──────► Collapsible thinking
 │   ├── ImageBubble.jsx ─────────► Image display
 │   ├── ComparisonBubble.jsx ────► Before/after
-│   ├── OptionsBubble.jsx ───────► Multiple choice
+│   ├── OptionsBubble.jsx ───────► Multiple choice + feedback input
 │   ├── ChecklistBubble.jsx ─────► Fix selection + custom fixes
 │   ├── CritiqueBubble.jsx ──────► Score display
 │   ├── InputRequestBubble.jsx ──► Text input prompt
@@ -183,42 +202,77 @@ frontend/src/
 
 ## Data Flow Diagrams
 
-### 1. Initial Generation Flow
+### 1. Pre-Generation Pipeline (HITL Gates)
 
 ```
-User Input (Form)
+User submits prompt
     │
-    │ {prompt, aspect_ratio, seed, input_images[base64]}
     ▼
 POST /api/generate
     │
-    ├─► Decode base64 images → PIL Images
-    ├─► Create GenerationRequest
-    ├─► Update state.pipeline
-    │   └─► {stage: "generating", aspect_ratio, input_images, ...}
+    ├─► Create PipelineContext(original_prompt=prompt, aspect_ratio=aspect_ratio)
+    ├─► Update state.pipeline["stage"] = "running_planner"
     │
-    ├─► If no prompt + images exist:
-    │   └─► infer_composition_prompt(images)
+    ├─► Run Planner Agent
+    │   ├─► planner.run(ctx) → enriches prompt
+    │   └─► ctx.enriched_prompt = detailed brief
     │
-    ├─► ModelFactory.get_generator().generate()
-    │   └─► Gemini API (gemini-3-pro-image-preview)
-    │       └─► Returns PIL Image
-    │
-    ├─► Save: outputs/00_initial.png
-    ├─► Update state.pipeline["image_path"]
-    │
-    ├─► Push messages:
-    │   ├─► {type: "thinking", content: "Generating..."}
-    │   ├─► {type: "text", content: "Done!"}
-    │   ├─► {type: "image", url: "/outputs/00_initial.png"}
-    │   └─► {type: "options", options: [accept, edit, reject]}
-    │
-    └─► Return {stage: "awaiting_initial_review", messages: [...]}
+    ├─► state.pipeline["pipeline_context"] = ctx
+    ├─► Push message: enriched prompt
+    ├─► Push message: options (approve/feedback/reject)
+    └─► Return {stage: "awaiting_planner_review", messages: [...]}
         │
         ▼
-Frontend receives messages
+User reviews enriched prompt → handleOption("approve") OR handleOption("feedback", "user input")
     │
-    └─► Renders message bubbles
+    ▼
+POST /api/review/agent {agent: "planner", decision: "approve"} OR {decision: "feedback", feedback: "..."}
+    │
+    ├─► Load ctx = state.pipeline["pipeline_context"]
+    │
+    ├─► If decision == "feedback":
+    │   ├─► ctx.original_prompt += f"\n\nUser feedback: {feedback}"
+    │   ├─► planner.run(ctx) → re-generates enriched prompt
+    │   └─► Return to review
+    │
+    ├─► If decision == "approve":
+    │   ├─► Run Art Director Agent
+    │   │   ├─► art_director.run(ctx) → defines style
+    │   │   └─► ctx.style_brief = style definition
+    │   │
+    │   ├─► Push message: style brief
+    │   ├─► Push message: options (approve/feedback/reject)
+    │   └─► Return {stage: "awaiting_art_director_review", messages: [...]}
+    │       │
+    │       ▼
+User reviews style brief → handleOption("approve")
+    │
+    ▼
+POST /api/review/agent {agent: "art_director", decision: "approve"}
+    │
+    ├─► Run DOP Agent
+    │   ├─► dop.run(ctx) → defines shot
+    │   └─► ctx.shot_brief = shot specifications
+    │
+    ├─► Push message: shot brief
+    ├─► Push message: options (approve/feedback/reject)
+    └─► Return {stage: "awaiting_dop_review", messages: [...]}
+        │
+        ▼
+User reviews shot setup → handleOption("approve")
+    │
+    ▼
+POST /api/review/agent {agent: "dop", decision: "approve"}
+    │
+    ├─► Run Generator Agent
+    │   ├─► generator.run(ctx)
+    │   ├─► Combines: enriched_prompt + style_brief + shot_brief
+    │   ├─► Calls GeminiGenerator.generate(combined_prompt, aspect_ratio)
+    │   └─► ctx.image = PIL Image
+    │
+    ├─► Save image: outputs/00_initial.png
+    ├─► Push messages: image, options
+    └─► Return {stage: "awaiting_initial_review", messages: [...]}
 ```
 
 ### 2. Critique Flow
@@ -227,29 +281,24 @@ Frontend receives messages
 User clicks "✓ Looks good — critique it"
     │
     ▼
-handleOption("accept")
+handleOption("accept") → stage === "awaiting_initial_review"
     │
     ▼
-POST /api/review/initial
+POST /api/critique {is_recritique: false}
     │
-    ├─► Push messages:
-    │   ├─► {type: "user", content: "Looks good, critique it"}
-    │   └─► {type: "thinking", content: "Running critique..."}
+    ├─► Load current_image_path from state.pipeline
+    ├─► Create PipelineContext with image
     │
-    ├─► agent.run_adk_segment("critique_agent", ...)
+    ├─► Run Critic Agent
+    │   ├─► critic.run(ctx)
+    │   ├─► Calls GeminiCritic.critique(image, prompt)
+    │   │   └─► Gemini API (gemini-3.1-pro-preview)
+    │   │       └─► Returns CritiqueResult dict
     │   │
-    │   ├─► ADK loads agents/critique_agent.yaml
-    │   ├─► Calls tools.critique_image(image_path, prompt)
-    │   │   │
-    │   │   ├─► ModelFactory.get_critic().critique(image, prompt)
-    │   │   │   └─► Gemini API (gemini-3.1-pro-preview)
-    │   │   │       └─► Returns CritiqueResult
-    │   │   │
-    │   │   └─► Save copy of image: outputs/01_annotated.png
-    │   │
-    │   └─► Returns critique JSON
+    │   └─► ctx.critiques.append(result)
     │
-    ├─► Update state.pipeline["critique"]
+    ├─► Save copy: outputs/01_annotated.png
+    ├─► Update state.pipeline["critique"] = result
     │
     ├─► Push messages:
     │   ├─► {type: "critique", score, assessment, passed}
@@ -408,14 +457,30 @@ pipeline = {
     "aspect_ratio": str,         # Selected aspect ratio
     "critique": dict,            # CritiqueResult data
     "messages": [dict],          # Message queue for chat UI
+    "pipeline_context": PipelineContext | None,  # Context object flowing through agents
 }
 ```
 
+**PipelineContext Structure:**
+```python
+@dataclass
+class PipelineContext:
+    original_prompt: str
+    aspect_ratio: str = "1:1"
+    enriched_prompt: str | None = None  # From planner
+    style_brief: str | None = None      # From art_director
+    shot_brief: str | None = None       # From dop
+    image: PIL.Image | None = None      # From generator
+    critiques: list[dict] = field(default_factory=list)  # From critic
+    metadata: dict = field(default_factory=dict)
+```
+
 **Key Principles:**
-- `current_image_path` is the **single source of truth** for the latest image
+- `pipeline_context` flows through all agents, accumulating outputs
+- Each agent reads from and writes to specific fields in the context
+- `current_image_path` is the **single source of truth** for file storage
 - `original_image_path` never changes after generation (used for comparisons)
 - When fixes are applied, `current_image_path` is updated to the new version
-- No conditional logic needed - always read from `current_image_path`
 
 ### State Transitions
 
@@ -426,14 +491,31 @@ selecting_aspect_ratio
 idle
     │
     ▼ User submits generation form
-generating
+running_planner
     │
-    ▼ Image generated
+    ▼ Planner agent completes
+awaiting_planner_review
+    │
+    ├─► User approves ──────────► running_art_director ──► awaiting_art_director_review
+    ├─► User gives feedback ────► running_planner (with feedback)
+    └─► User rejects ───────────► idle
+
+awaiting_art_director_review
+    │
+    ├─► User approves ──────────► running_dop ──► awaiting_dop_review
+    ├─► User gives feedback ────► running_art_director (with feedback)
+    └─► User rejects ───────────► idle
+
+awaiting_dop_review
+    │
+    ├─► User approves ──────────► running_generator ──► awaiting_initial_review
+    ├─► User gives feedback ────► running_dop (with feedback)
+    └─► User rejects ───────────► idle
+
 awaiting_initial_review
     │
-    ├─► User clicks "accept" ────► critiquing ────► awaiting_fix_review
-    ├─► User clicks "edit" ──────► awaiting_edit ──► (regenerate) ──► generating
-    └─► User clicks "reject" ────► idle
+    ├─► User clicks "critique" ─► critiquing ──► awaiting_fix_review
+    └─► User clicks "reject" ───► idle
 
 awaiting_fix_review
     │
@@ -679,11 +761,43 @@ Content-Type: application/json
 This architecture provides:
 
 1. **Clean Separation**: Backend handles state/logic, frontend handles UI
-2. **Message-Based UI**: Flexible chat interface that can render any message type
-3. **Iterative Refinement**: Critique → Fix → Re-critique loop
-4. **Human-in-the-Loop**: User controls at every decision point
-5. **Extensibility**: Easy to add new message types and workflow stages
-6. **Single-Server**: Simple deployment with Flask serving everything
+2. **ABC Pattern**: Extensible agent system with abstract base classes
+3. **Registry Pattern**: Centralized registration for agents and models
+4. **Pipeline Pattern**: Sequential agent execution with context passing
+5. **Human-in-the-Loop (HITL)**: Review gates between each pre-generation agent with feedback loops
+6. **Configuration-Driven**: Single AGENT_CONFIG dictionary drives all review workflows
+7. **Message-Based UI**: Flexible chat interface that can render any message type
+8. **Iterative Refinement**: Critique → Fix → Re-critique loop
+9. **Extensibility**: Easy to add new agents, message types, and workflow stages
+10. **Single-Server**: Simple deployment with Flask serving everything
+
+### Key Architectural Patterns
+
+**ABC + Registry Pattern:**
+- All agents inherit from `PipelineAgent` ABC
+- All generators inherit from `ImageGenerator` ABC
+- All critics inherit from `ImageCritic` ABC
+- Centralized registry in `models/registry.py` for easy swapping
+
+**Pipeline Context Flow:**
+```
+PipelineContext
+  └─► Planner       → enriched_prompt
+      └─► Art Director → style_brief
+          └─► DOP         → shot_brief
+              └─► Generator  → image
+                  └─► Critic    → critiques[]
+```
+
+**Configuration-Driven HITL:**
+- `AGENT_CONFIG` dictionary maps agent names to workflow metadata
+- Single `/api/review/agent` endpoint handles all review gates
+- Frontend extracts agent name from stage via regex
+- Adding new HITL agent only requires config entry
+
+**Lazy Loading:**
+- Generator and Critic agents use lazy loading to avoid circular imports
+- Backend models instantiated on-demand via registry
 
 The data flow is unidirectional and predictable:
-- User action → API request → Backend processing → State update → Message push → API response → Frontend render
+- User action → API request → Backend processing → Agent execution → Context update → State update → Message push → API response → Frontend render

@@ -28,6 +28,8 @@ def generate():
     import base64
     import io
     from PIL import Image
+    from models.pipeline_context import PipelineContext
+    from agent import run_pre_generation, run_generator
 
     state.reset()
     data = request.json
@@ -45,44 +47,43 @@ def generate():
     request_data = {k: v for k, v in data.items() if k != "input_images"}
     req = GenerationRequest(**request_data)
 
-    state.pipeline.update(request=req.model_dump(), stage="generating", input_images=input_images, aspect_ratio=req.aspect_ratio)
+    state.pipeline.update(request=req.model_dump(), stage="running_planner", input_images=input_images, aspect_ratio=req.aspect_ratio)
 
-    if input_images:
+    # Use new pipeline system with HITL gates
+    ctx = PipelineContext(
+        original_prompt=req.prompt,
+        aspect_ratio=req.aspect_ratio
+    )
+
+    # Import and run just the planner agent
+    from agent import get_pipeline
+    pipeline = get_pipeline()
+
+    # Find and run planner
+    planner = next((a for a in pipeline if a.name == "planner"), None)
+    if planner:
         state.push_message({"role": "agent", "type": "thinking",
-            "content": f"Composing image from {len(input_images)} input image(s) with prompt: \"{req.prompt}\"..."})
-    else:
-        state.push_message({"role": "agent", "type": "thinking",
-            "content": f"Generating with prompt: \"{req.prompt}\" at {req.aspect_ratio}..."})
+            "content": "Planning and expanding prompt..."})
+        ctx = planner.run(ctx)
 
-    # Call the tool directly with input_images support
-    from pipeline.tools import TOOL_REGISTRY
-    class MockToolContext:
-        class Actions:
-            escalate = False
-        actions = Actions()
+    # Store context for next steps
+    state.pipeline["pipeline_context"] = ctx
 
-    # Generate with optional input images
-    from models.registry import get_generator
-    generator = get_generator()
-    image = generator.generate(req.prompt, req.aspect_ratio, input_images=input_images or None)
-    path = str(config.OUTPUT_DIR / "00_initial.png")
-    image.save(path)
-    state.pipeline["current_image_path"] = path
-    state.pipeline["original_image_path"] = path  # Save original for comparison
+    # Show enriched prompt to user for review
+    if ctx.enriched_prompt:
+        state.push_message({"role": "agent", "type": "text",
+            "content": f"**Enriched prompt:**\n\n{ctx.enriched_prompt}"})
 
-    state.push_message({"role": "agent", "type": "text",
-        "content": "Done! Here's your initial generation:"})
-    state.push_message({"role": "agent", "type": "image",
-        "url": "/outputs/00_initial.png", "caption": ""})
+    # Ask for approval or feedback
     state.push_message({"role": "agent", "type": "options",
-        "prompt": "What would you like to do?",
+        "prompt": "Does this enriched prompt look good?",
         "options": [
-            {"label": "✓ Looks good — critique it", "value": "accept"},
-            {"label": "✎ Edit my prompt",            "value": "edit"},
-            {"label": "✕ Start over",                "value": "reject"}
+            {"label": "✓ Approve - Continue to style", "value": "approve"},
+            {"label": "✎ Give feedback", "value": "feedback"},
+            {"label": "✕ Start over", "value": "reject"}
         ]})
 
-    state.pipeline["stage"] = "awaiting_initial_review"
+    state.pipeline["stage"] = "awaiting_planner_review"
     return jsonify({"stage": state.pipeline["stage"],
                     "messages": state.pipeline["messages"]})
 
@@ -113,6 +114,162 @@ def review_initial():
     # accept → run critique
     return run_critique(is_recritique=False)
 
+# ── Pipeline Agent Reviews (HITL Gates) ───────────────────────────
+
+# Agent configuration: defines output fields, labels, and next agent
+AGENT_CONFIG = {
+    "planner": {
+        "output_field": "enriched_prompt",
+        "output_label": "Enriched prompt",
+        "thinking_revise": "Revising enriched prompt based on your feedback...",
+        "approval_message": "Approved enriched prompt.",
+        "next_agent": "art_director",
+        "next_stage": "awaiting_art_director_review",
+        "next_label": "Continue to style",
+        "feedback_to_field": "original_prompt",  # Where to inject feedback
+    },
+    "art_director": {
+        "output_field": "style_brief",
+        "output_label": "Style brief",
+        "thinking_revise": "Revising style brief based on your feedback...",
+        "approval_message": "Approved style brief.",
+        "next_agent": "dop",
+        "next_stage": "awaiting_dop_review",
+        "next_label": "Continue to shot setup",
+        "feedback_to_field": "enriched_prompt",
+    },
+    "dop": {
+        "output_field": "shot_brief",
+        "output_label": "Shot brief",
+        "thinking_revise": "Revising shot brief based on your feedback...",
+        "approval_message": "Approved shot setup. Generating image...",
+        "next_agent": "generator",
+        "next_stage": "awaiting_initial_review",
+        "next_label": "Generate image",
+        "feedback_to_field": "style_brief",
+    },
+}
+
+@app.post("/api/review/agent")
+def review_agent():
+    """Generic agent review handler - works for any pipeline agent."""
+    from models.pipeline_context import PipelineContext
+    from agent import get_pipeline, run_generator
+
+    agent_name = request.json["agent"]
+    decision = request.json["decision"]
+    feedback = request.json.get("feedback")
+
+    if agent_name not in AGENT_CONFIG:
+        return jsonify({"error": f"Unknown agent: {agent_name}"}), 400
+
+    agent_config = AGENT_CONFIG[agent_name]
+    ctx = state.pipeline.get("pipeline_context")
+    if not ctx:
+        return jsonify({"error": "No pipeline context found"}), 400
+
+    # Handle reject - start over
+    if decision == "reject":
+        state.push_message({"role": "user", "type": "text", "content": "Start over."})
+        state.reset()
+        return jsonify({"stage": "idle", "messages": state.pipeline["messages"][-1:]})
+
+    # Handle feedback - re-run agent with feedback
+    if decision == "feedback":
+        state.push_message({"role": "user", "type": "text", "content": f"Feedback: {feedback}"})
+        state.push_message({"role": "agent", "type": "thinking", "content": agent_config["thinking_revise"]})
+
+        # Inject feedback into appropriate field
+        feedback_field = agent_config["feedback_to_field"]
+        current_value = getattr(ctx, feedback_field)
+        setattr(ctx, feedback_field, f"{current_value}\n\nUser feedback: {feedback}")
+
+        # Re-run the agent
+        pipeline = get_pipeline()
+        agent = next((a for a in pipeline if a.name == agent_name), None)
+        if agent:
+            ctx = agent.run(ctx)
+
+        state.pipeline["pipeline_context"] = ctx
+
+        # Show revised output
+        output_value = getattr(ctx, agent_config["output_field"])
+        state.push_message({"role": "agent", "type": "text",
+            "content": f"**Revised {agent_config['output_label'].lower()}:**\n\n{output_value}"})
+
+        # Show same options again
+        current_stage = f"awaiting_{agent_name}_review"
+        state.push_message({"role": "agent", "type": "options",
+            "prompt": "Does this look better?",
+            "options": [
+                {"label": f"✓ Approve - {agent_config['next_label']}", "value": "approve"},
+                {"label": "✎ Give more feedback", "value": "feedback"},
+                {"label": "✕ Start over", "value": "reject"}
+            ]})
+        return jsonify({"stage": current_stage, "messages": state.pipeline["messages"][-3:]})
+
+    # Handle approve - run next agent
+    state.push_message({"role": "user", "type": "text", "content": agent_config["approval_message"]})
+
+    next_agent_name = agent_config["next_agent"]
+
+    # Special case: if next is generator, generate image
+    if next_agent_name == "generator":
+        state.push_message({"role": "agent", "type": "thinking", "content": "Generating image..."})
+        ctx = run_generator(ctx)
+
+        # Save generated image
+        from config import config as app_config
+        path = str(app_config.OUTPUT_DIR / "00_initial.png")
+        ctx.image.save(path)
+        state.pipeline["current_image_path"] = path
+        state.pipeline["original_image_path"] = path
+
+        state.push_message({"role": "agent", "type": "text",
+            "content": "Done! Here's your generated image:"})
+        state.push_message({"role": "agent", "type": "image",
+            "url": "/outputs/00_initial.png", "caption": ""})
+        state.push_message({"role": "agent", "type": "options",
+            "prompt": "What would you like to do?",
+            "options": [
+                {"label": "✓ Looks good — critique it", "value": "accept"},
+                {"label": "✕ Start over", "value": "reject"}
+            ]})
+
+        state.pipeline["stage"] = agent_config["next_stage"]
+        return jsonify({"stage": state.pipeline["stage"], "messages": state.pipeline["messages"][-5:]})
+
+    # Otherwise, run next agent in pipeline
+    pipeline = get_pipeline()
+    next_agent = next((a for a in pipeline if a.name == next_agent_name), None)
+    if next_agent:
+        # Get thinking message from next agent config
+        next_config = AGENT_CONFIG.get(next_agent_name, {})
+        thinking = next_config.get("thinking_revise", f"Running {next_agent_name}...")
+        thinking = thinking.replace("Revising", "Defining").replace(" based on your feedback", "")
+        state.push_message({"role": "agent", "type": "thinking", "content": thinking})
+        ctx = next_agent.run(ctx)
+
+    state.pipeline["pipeline_context"] = ctx
+
+    # Show output from next agent
+    next_config = AGENT_CONFIG[next_agent_name]
+    output_value = getattr(ctx, next_config["output_field"])
+    state.push_message({"role": "agent", "type": "text",
+        "content": f"**{next_config['output_label']}:**\n\n{output_value}"})
+
+    # Show options for next review
+    state.push_message({"role": "agent", "type": "options",
+        "prompt": f"Does this {next_config['output_label'].lower()} work?",
+        "options": [
+            {"label": f"✓ Approve - {next_config['next_label']}", "value": "approve"},
+            {"label": "✎ Give feedback", "value": "feedback"},
+            {"label": "✕ Start over", "value": "reject"}
+        ]})
+
+    state.pipeline["stage"] = agent_config["next_stage"]
+    return jsonify({"stage": state.pipeline["stage"], "messages": state.pipeline["messages"][-4:]})
+
 # ── Critique (Unified endpoint for initial + re-critique) ─────────
 
 @app.post("/api/critique")
@@ -124,6 +281,9 @@ def critique():
 def run_critique(is_recritique=False):
     """Internal function to run critique logic."""
     import os
+    from PIL import Image
+    from models.pipeline_context import PipelineContext
+    from agent import run_post_generation
 
     # Always use current_image_path - it's the single source of truth
     current_image_path = state.pipeline.get("current_image_path")
@@ -135,33 +295,40 @@ def run_critique(is_recritique=False):
     filename = os.path.basename(current_image_path)
     display_url = f"/outputs/{filename}"
 
-    # User message and thinking text
+    # User message
     if is_recritique:
         state.push_message({"role": "user", "type": "text", "content": "Run critique again."})
-        thinking_msg = "Running vision critique on the current image..."
     else:
         state.push_message({"role": "user", "type": "text", "content": "Looks good, critique it."})
-        thinking_msg = "Running vision critique against the original prompt..."
-
-    # Push thinking message
-    state.push_message({"role": "agent", "type": "thinking", "content": thinking_msg})
 
     # Show the current image being critiqued (for re-critique, show which version)
     if is_recritique:
         state.push_message({"role": "agent", "type": "image",
             "url": display_url, "caption": "Current image"})
 
-    # Run the critique agent
-    agent.run_adk_segment(
-        agent_yaml="critique_agent",
-        input_message="Critique the current image.",
-        state_in={"image_path": current_image_path,
-                  "prompt": state.pipeline["request"]["prompt"]},
-        state_out_keys=["critique_json"]
+    # Use new pipeline system for critique
+    ctx = PipelineContext(
+        original_prompt=state.pipeline["request"]["prompt"],
+        aspect_ratio=state.pipeline.get("aspect_ratio", "1:1"),
+        image=Image.open(current_image_path)
     )
 
-    critique = state.pipeline["critique_json"]
-    state.pipeline["critique"] = critique
+    # Run post-generation agents (includes critic) with chat feedback
+    ctx = run_post_generation(ctx, message_callback=state.push_message)
+
+    # Extract critique from context
+    if ctx.critiques:
+        critique = ctx.critiques[0]  # Get the first (and only) critique
+        state.pipeline["critique_json"] = critique
+        state.pipeline["critique"] = critique
+    else:
+        return jsonify({"error": "No critique generated"}), 500
+
+    # Save a copy of the critiqued image as annotated (for display in chat)
+    # Note: We removed bbox annotations, so this is just the same image
+    annotated_path = str(config.OUTPUT_DIR / "01_annotated.png")
+    ctx.image.save(annotated_path)
+
     passed = critique["pass_threshold_met"]
 
     # Push critique result
@@ -170,7 +337,7 @@ def run_critique(is_recritique=False):
         "assessment": critique["overall_assessment"],
         "passed":     passed})
 
-    # Show annotated image
+    # Show annotated image (same as generated, but shown for context)
     state.push_message({"role": "agent", "type": "image",
         "url": "/outputs/01_annotated.png", "caption": "Issues annotated"})
 
