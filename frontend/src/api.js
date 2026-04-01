@@ -6,8 +6,11 @@ const post = (path, body) =>
   }).then(r => r.json());
 
 // Every response includes { ...data, messages: [...newMessages] }
-export const generate      = (form)                 => post("/generate", form);
-export const reviewInitial = (decision, new_prompt) => post("/review/initial", { decision, new_prompt });
-export const critique      = (isRecritique = false) => post("/critique", { is_recritique: isRecritique });
-export const reviewFixes   = (ids, customFixes = []) => post("/review/fixes", { approved_fix_ids: ids, custom_fixes: customFixes });
-export const acceptFix     = (accepted)             => post("/fix/accept", { accepted });
+export const generate         = (form)                 => post("/generate", form);
+export const reviewInitial    = (decision, new_prompt) => post("/review/initial", { decision, new_prompt });
+export const reviewPlanner    = (decision, feedback)   => post("/review/planner", { decision, feedback });
+export const reviewArtDirector = (decision, feedback)  => post("/review/art_director", { decision, feedback });
+export const reviewDop        = (decision, feedback)   => post("/review/dop", { decision, feedback });
+export const critique         = (isRecritique = false) => post("/critique", { is_recritique: isRecritique });
+export const reviewFixes      = (ids, customFixes = []) => post("/review/fixes", { approved_fix_ids: ids, custom_fixes: customFixes });
+export const acceptFix        = (accepted)             => post("/fix/accept", { accepted });

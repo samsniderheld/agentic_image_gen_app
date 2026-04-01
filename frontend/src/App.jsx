@@ -60,7 +60,7 @@ export default function App() {
     append(res.messages);
   };
 
-  const handleOption = async (value) => {
+  const handleOption = async (value, feedback = null) => {
     // Handle aspect ratio selection
     if (["1:1", "16:9", "9:16", "4:3"].includes(value)) {
       setAspectRatio(value);
@@ -69,6 +69,27 @@ export default function App() {
         { role: "agent", type: "text", content: "Great! Now describe what you'd like to generate." }
       ]);
       setStage("idle");
+      return;
+    }
+
+    // Handle pipeline agent reviews with approve/feedback/reject
+    if (stage === "awaiting_planner_review") {
+      setStage("processing");
+      const res = await api.reviewPlanner(value, feedback);
+      setStage(res.stage);
+      append(res.messages);
+      return;
+    } else if (stage === "awaiting_art_director_review") {
+      setStage("processing");
+      const res = await api.reviewArtDirector(value, feedback);
+      setStage(res.stage);
+      append(res.messages);
+      return;
+    } else if (stage === "awaiting_dop_review") {
+      setStage("processing");
+      const res = await api.reviewDop(value, feedback);
+      setStage(res.stage);
+      append(res.messages);
       return;
     }
 

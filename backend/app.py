@@ -47,56 +47,43 @@ def generate():
     request_data = {k: v for k, v in data.items() if k != "input_images"}
     req = GenerationRequest(**request_data)
 
-    state.pipeline.update(request=req.model_dump(), stage="generating", input_images=input_images, aspect_ratio=req.aspect_ratio)
+    state.pipeline.update(request=req.model_dump(), stage="running_planner", input_images=input_images, aspect_ratio=req.aspect_ratio)
 
-    # Show initial thinking message
-    state.push_message({"role": "agent", "type": "thinking",
-        "content": f"Starting generation pipeline for: \"{req.prompt}\""})
-
-    # Use new pipeline system
+    # Use new pipeline system with HITL gates
     ctx = PipelineContext(
         original_prompt=req.prompt,
         aspect_ratio=req.aspect_ratio
     )
 
-    # Run pre-generation agents (planner, art_director, dop) with chat feedback
-    ctx = run_pre_generation(ctx, message_callback=state.push_message)
+    # Import and run just the planner agent
+    from agent import get_pipeline
+    pipeline = get_pipeline()
 
-    # Show enriched prompt if generated - consolidate into one message
-    pipeline_summary = []
+    # Find and run planner
+    planner = next((a for a in pipeline if a.name == "planner"), None)
+    if planner:
+        state.push_message({"role": "agent", "type": "thinking",
+            "content": "Planning and expanding prompt..."})
+        ctx = planner.run(ctx)
+
+    # Store context for next steps
+    state.pipeline["pipeline_context"] = ctx
+
+    # Show enriched prompt to user for review
     if ctx.enriched_prompt:
-        pipeline_summary.append(f"**Enriched prompt:** {ctx.enriched_prompt}")
-    if ctx.style_brief:
-        pipeline_summary.append(f"**Style brief:** {ctx.style_brief}")
-    if ctx.shot_brief:
-        pipeline_summary.append(f"**Shot brief:** {ctx.shot_brief}")
-
-    if pipeline_summary:
         state.push_message({"role": "agent", "type": "text",
-            "content": "\n\n".join(pipeline_summary)})
+            "content": f"**Enriched prompt:**\n\n{ctx.enriched_prompt}"})
 
-    # Run generator with chat feedback
-    ctx = run_generator(ctx, message_callback=state.push_message)
-
-    # Save generated image
-    path = str(config.OUTPUT_DIR / "00_initial.png")
-    ctx.image.save(path)
-    state.pipeline["current_image_path"] = path
-    state.pipeline["original_image_path"] = path  # Save original for comparison
-
-    state.push_message({"role": "agent", "type": "text",
-        "content": "Done! Here's your initial generation:"})
-    state.push_message({"role": "agent", "type": "image",
-        "url": "/outputs/00_initial.png", "caption": ""})
+    # Ask for approval or feedback
     state.push_message({"role": "agent", "type": "options",
-        "prompt": "What would you like to do?",
+        "prompt": "Does this enriched prompt look good?",
         "options": [
-            {"label": "✓ Looks good — critique it", "value": "accept"},
-            {"label": "✎ Edit my prompt",            "value": "edit"},
-            {"label": "✕ Start over",                "value": "reject"}
+            {"label": "✓ Approve - Continue to style", "value": "approve"},
+            {"label": "✎ Give feedback", "value": "feedback"},
+            {"label": "✕ Start over", "value": "reject"}
         ]})
 
-    state.pipeline["stage"] = "awaiting_initial_review"
+    state.pipeline["stage"] = "awaiting_planner_review"
     return jsonify({"stage": state.pipeline["stage"],
                     "messages": state.pipeline["messages"]})
 
@@ -126,6 +113,223 @@ def review_initial():
 
     # accept → run critique
     return run_critique(is_recritique=False)
+
+# ── Pipeline Agent Reviews (HITL Gates) ───────────────────────────
+
+@app.post("/api/review/planner")
+def review_planner():
+    """Review planner output and continue to art director."""
+    from models.pipeline_context import PipelineContext
+    from agent import get_pipeline
+
+    decision = request.json["decision"]
+    feedback = request.json.get("feedback")
+
+    ctx = state.pipeline.get("pipeline_context")
+    if not ctx:
+        return jsonify({"error": "No pipeline context found"}), 400
+
+    if decision == "reject":
+        state.push_message({"role": "user", "type": "text", "content": "Start over."})
+        state.reset()
+        return jsonify({"stage": "idle", "messages": state.pipeline["messages"][-1:]})
+
+    if decision == "feedback":
+        state.push_message({"role": "user", "type": "text", "content": f"Feedback: {feedback}"})
+        # Re-run planner with feedback
+        state.push_message({"role": "agent", "type": "thinking", "content": "Revising enriched prompt based on your feedback..."})
+
+        # Add feedback to the original prompt
+        ctx.original_prompt = f"{ctx.original_prompt}\n\nUser feedback: {feedback}"
+
+        pipeline = get_pipeline()
+        planner = next((a for a in pipeline if a.name == "planner"), None)
+        if planner:
+            ctx = planner.run(ctx)
+
+        state.pipeline["pipeline_context"] = ctx
+        state.push_message({"role": "agent", "type": "text",
+            "content": f"**Revised enriched prompt:**\n\n{ctx.enriched_prompt}"})
+        state.push_message({"role": "agent", "type": "options",
+            "prompt": "Does this look better?",
+            "options": [
+                {"label": "✓ Approve - Continue to style", "value": "approve"},
+                {"label": "✎ Give more feedback", "value": "feedback"},
+                {"label": "✕ Start over", "value": "reject"}
+            ]})
+        return jsonify({"stage": "awaiting_planner_review", "messages": state.pipeline["messages"][-3:]})
+
+    # approve → continue to art director
+    state.push_message({"role": "user", "type": "text", "content": "Approved enriched prompt."})
+
+    pipeline = get_pipeline()
+    art_director = next((a for a in pipeline if a.name == "art_director"), None)
+    if art_director:
+        state.push_message({"role": "agent", "type": "thinking", "content": "Defining visual style..."})
+        ctx = art_director.run(ctx)
+
+    state.pipeline["pipeline_context"] = ctx
+
+    if ctx.style_brief:
+        state.push_message({"role": "agent", "type": "text",
+            "content": f"**Style brief:**\n\n{ctx.style_brief}"})
+
+    state.push_message({"role": "agent", "type": "options",
+        "prompt": "Does this visual style work?",
+        "options": [
+            {"label": "✓ Approve - Continue to shot setup", "value": "approve"},
+            {"label": "✎ Give feedback", "value": "feedback"},
+            {"label": "✕ Start over", "value": "reject"}
+        ]})
+
+    state.pipeline["stage"] = "awaiting_art_director_review"
+    return jsonify({"stage": state.pipeline["stage"], "messages": state.pipeline["messages"][-4:]})
+
+
+@app.post("/api/review/art_director")
+def review_art_director():
+    """Review art director output and continue to DOP."""
+    from models.pipeline_context import PipelineContext
+    from agent import get_pipeline
+
+    decision = request.json["decision"]
+    feedback = request.json.get("feedback")
+
+    ctx = state.pipeline.get("pipeline_context")
+    if not ctx:
+        return jsonify({"error": "No pipeline context found"}), 400
+
+    if decision == "reject":
+        state.push_message({"role": "user", "type": "text", "content": "Start over."})
+        state.reset()
+        return jsonify({"stage": "idle", "messages": state.pipeline["messages"][-1:]})
+
+    if decision == "feedback":
+        state.push_message({"role": "user", "type": "text", "content": f"Feedback: {feedback}"})
+        state.push_message({"role": "agent", "type": "thinking", "content": "Revising style brief based on your feedback..."})
+
+        # Temporarily store feedback in metadata
+        ctx.metadata["art_director_feedback"] = feedback
+
+        pipeline = get_pipeline()
+        art_director = next((a for a in pipeline if a.name == "art_director"), None)
+        if art_director:
+            # Modify enriched prompt with feedback for art director
+            original_enriched = ctx.enriched_prompt
+            ctx.enriched_prompt = f"{ctx.enriched_prompt}\n\nStyle feedback: {feedback}"
+            ctx = art_director.run(ctx)
+            ctx.enriched_prompt = original_enriched  # Restore
+
+        state.pipeline["pipeline_context"] = ctx
+        state.push_message({"role": "agent", "type": "text",
+            "content": f"**Revised style brief:**\n\n{ctx.style_brief}"})
+        state.push_message({"role": "agent", "type": "options",
+            "prompt": "Does this look better?",
+            "options": [
+                {"label": "✓ Approve - Continue to shot setup", "value": "approve"},
+                {"label": "✎ Give more feedback", "value": "feedback"},
+                {"label": "✕ Start over", "value": "reject"}
+            ]})
+        return jsonify({"stage": "awaiting_art_director_review", "messages": state.pipeline["messages"][-3:]})
+
+    # approve → continue to DOP
+    state.push_message({"role": "user", "type": "text", "content": "Approved style brief."})
+
+    pipeline = get_pipeline()
+    dop = next((a for a in pipeline if a.name == "dop"), None)
+    if dop:
+        state.push_message({"role": "agent", "type": "thinking", "content": "Setting up shot specifications..."})
+        ctx = dop.run(ctx)
+
+    state.pipeline["pipeline_context"] = ctx
+
+    if ctx.shot_brief:
+        state.push_message({"role": "agent", "type": "text",
+            "content": f"**Shot brief:**\n\n{ctx.shot_brief}"})
+
+    state.push_message({"role": "agent", "type": "options",
+        "prompt": "Does this shot setup work?",
+        "options": [
+            {"label": "✓ Approve - Generate image", "value": "approve"},
+            {"label": "✎ Give feedback", "value": "feedback"},
+            {"label": "✕ Start over", "value": "reject"}
+        ]})
+
+    state.pipeline["stage"] = "awaiting_dop_review"
+    return jsonify({"stage": state.pipeline["stage"], "messages": state.pipeline["messages"][-4:]})
+
+
+@app.post("/api/review/dop")
+def review_dop():
+    """Review DOP output and generate image."""
+    from models.pipeline_context import PipelineContext
+    from agent import get_pipeline, run_generator
+
+    decision = request.json["decision"]
+    feedback = request.json.get("feedback")
+
+    ctx = state.pipeline.get("pipeline_context")
+    if not ctx:
+        return jsonify({"error": "No pipeline context found"}), 400
+
+    if decision == "reject":
+        state.push_message({"role": "user", "type": "text", "content": "Start over."})
+        state.reset()
+        return jsonify({"stage": "idle", "messages": state.pipeline["messages"][-1:]})
+
+    if decision == "feedback":
+        state.push_message({"role": "user", "type": "text", "content": f"Feedback: {feedback}"})
+        state.push_message({"role": "agent", "type": "thinking", "content": "Revising shot brief based on your feedback..."})
+
+        # Store feedback in metadata
+        ctx.metadata["dop_feedback"] = feedback
+
+        pipeline = get_pipeline()
+        dop = next((a for a in pipeline if a.name == "dop"), None)
+        if dop:
+            # Add feedback context
+            if ctx.style_brief:
+                ctx.style_brief = f"{ctx.style_brief}\n\nShot feedback: {feedback}"
+            ctx = dop.run(ctx)
+
+        state.pipeline["pipeline_context"] = ctx
+        state.push_message({"role": "agent", "type": "text",
+            "content": f"**Revised shot brief:**\n\n{ctx.shot_brief}"})
+        state.push_message({"role": "agent", "type": "options",
+            "prompt": "Does this look better?",
+            "options": [
+                {"label": "✓ Approve - Generate image", "value": "approve"},
+                {"label": "✎ Give more feedback", "value": "feedback"},
+                {"label": "✕ Start over", "value": "reject"}
+            ]})
+        return jsonify({"stage": "awaiting_dop_review", "messages": state.pipeline["messages"][-3:]})
+
+    # approve → generate image
+    state.push_message({"role": "user", "type": "text", "content": "Approved shot setup. Generating image..."})
+    state.push_message({"role": "agent", "type": "thinking", "content": "Generating image..."})
+
+    # Run generator
+    ctx = run_generator(ctx)
+
+    # Save generated image
+    path = str(config.OUTPUT_DIR / "00_initial.png")
+    ctx.image.save(path)
+    state.pipeline["current_image_path"] = path
+    state.pipeline["original_image_path"] = path
+
+    state.push_message({"role": "agent", "type": "text",
+        "content": "Done! Here's your generated image:"})
+    state.push_message({"role": "agent", "type": "image",
+        "url": "/outputs/00_initial.png", "caption": ""})
+    state.push_message({"role": "agent", "type": "options",
+        "prompt": "What would you like to do?",
+        "options": [
+            {"label": "✓ Looks good — critique it", "value": "accept"},
+            {"label": "✕ Start over", "value": "reject"}
+        ]})
+
+    state.pipeline["stage"] = "awaiting_initial_review"
+    return jsonify({"stage": state.pipeline["stage"], "messages": state.pipeline["messages"][-5:]})
 
 # ── Critique (Unified endpoint for initial + re-critique) ─────────
 
@@ -181,6 +385,11 @@ def run_critique(is_recritique=False):
     else:
         return jsonify({"error": "No critique generated"}), 500
 
+    # Save a copy of the critiqued image as annotated (for display in chat)
+    # Note: We removed bbox annotations, so this is just the same image
+    annotated_path = str(config.OUTPUT_DIR / "01_annotated.png")
+    ctx.image.save(annotated_path)
+
     passed = critique["pass_threshold_met"]
 
     # Push critique result
@@ -189,7 +398,7 @@ def run_critique(is_recritique=False):
         "assessment": critique["overall_assessment"],
         "passed":     passed})
 
-    # Show annotated image
+    # Show annotated image (same as generated, but shown for context)
     state.push_message({"role": "agent", "type": "image",
         "url": "/outputs/01_annotated.png", "caption": "Issues annotated"})
 
