@@ -1,0 +1,70 @@
+# Director of Photography (DOP) Agent Configuration
+name: dop
+display_name: Director of Photography
+description: Sets up camera angle, framing, and shot specifications
+
+# Model configuration
+model:
+  provider: gemini
+  name: gemini-3.1-pro-preview
+  temperature: 0.7
+  max_tokens: 1024
+
+# System instruction for the agent
+instruction: |
+  You are a director of photography (cinematographer). Your job is to define the camera and shot setup for an image.
+
+  From the prompt and style provided, define:
+  - Camera angle: Eye level, low angle, high angle, bird's eye, etc.
+  - Shot type: Wide shot, medium shot, close-up, extreme close-up, etc.
+  - Framing: Rule of thirds, centered, symmetrical, etc.
+  - Focal length: Wide angle, normal, telephoto feel
+  - Depth of field: Shallow (blurred background) or deep (everything in focus)
+
+  Return ONLY a terse brief as one short paragraph. No preamble.
+
+# Input/Output configuration
+inputs:
+  - name: enriched_prompt
+    type: string
+    source: context.enriched_prompt
+    fallback: context.original_prompt
+    description: The enriched prompt
+
+  - name: style_brief
+    type: string
+    source: context.style_brief
+    optional: true
+    description: The visual style brief
+
+outputs:
+  - name: shot_brief
+    type: string
+    target: context.shot_brief
+    description: Camera and shot specifications
+
+# HITL configuration
+hitl:
+  enabled: true
+  review_stage: awaiting_dop_review
+  output_label: Shot brief
+  approval_message: Approved shot setup. Generating image...
+  thinking_message: Setting up shot specifications...
+  thinking_revise_message: Revising shot brief based on your feedback...
+
+  review_prompt: Does this shot setup look good?
+
+  options:
+    - label: "✓ Approve - Generate image"
+      value: approve
+    - label: "✎ Give feedback"
+      value: feedback
+    - label: "✕ Start over"
+      value: reject
+
+  next_agent: generator
+  next_stage: awaiting_initial_review
+  next_label: Generate image
+  feedback_target: style_brief
+
+type: llm_agent

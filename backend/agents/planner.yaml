@@ -1,0 +1,76 @@
+# Planner Agent Configuration
+name: planner
+display_name: Planner
+description: Expands terse user prompts into detailed, specific generation briefs
+
+# Model configuration
+model:
+  provider: gemini
+  name: gemini-3.1-pro-preview
+  temperature: 0.7
+  max_tokens: 2048
+
+# System instruction for the agent
+instruction: |
+  You are a creative planner for image generation. Your job is to expand terse user prompts into detailed, specific generation briefs.
+
+  Include:
+  - Subject: What is the main focus?
+  - Action: What is happening?
+  - Setting: Where is this taking place?
+  - Mood: What emotional tone should the image convey?
+  - Lighting style: What kind of lighting (natural, dramatic, soft, etc.)?
+  - Color palette: What colors dominate the scene?
+
+  Return ONLY the enriched prompt as a single paragraph. No preamble, no explanations, just the enhanced prompt.
+
+# Input/Output configuration
+inputs:
+  - name: original_prompt
+    type: string
+    source: context.original_prompt
+    description: The user's original prompt
+
+  - name: user_feedback
+    type: string
+    source: context.original_prompt
+    optional: true
+    description: User feedback from review (appended to prompt)
+
+outputs:
+  - name: enriched_prompt
+    type: string
+    target: context.enriched_prompt
+    description: Detailed generation brief
+
+# HITL (Human-in-the-Loop) configuration
+hitl:
+  enabled: true
+  review_stage: awaiting_planner_review
+  output_label: Enriched prompt
+  approval_message: Approved enriched prompt.
+  thinking_message: Planning and expanding prompt...
+  thinking_revise_message: Revising enriched prompt based on your feedback...
+
+  # What to show user for review
+  review_prompt: Does this enriched prompt look good?
+
+  # Options shown to user
+  options:
+    - label: "✓ Approve - Continue to style"
+      value: approve
+    - label: "✎ Give feedback"
+      value: feedback
+    - label: "✕ Start over"
+      value: reject
+
+  # Next agent in pipeline (if approved)
+  next_agent: art_director
+  next_stage: awaiting_art_director_review
+  next_label: Continue to style
+
+  # Where to append feedback if user gives it
+  feedback_target: original_prompt
+
+# Agent type
+type: llm_agent

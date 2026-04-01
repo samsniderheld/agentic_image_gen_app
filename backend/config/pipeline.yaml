@@ -1,0 +1,64 @@
+# Agent Pipeline Configuration
+# Defines the sequence of agents and their execution order
+
+pipeline:
+  name: image_generation_pipeline
+  description: Full pipeline from prompt to critique with HITL gates
+
+  # Agent execution sequence
+  agents:
+    - planner        # Expands user prompt
+    - art_director   # Defines visual style
+    - dop           # Sets up shot specifications
+    - generator     # Generates the image
+    - critic        # Critiques the result
+
+  # Pipeline-wide settings
+  settings:
+    # Enable HITL (Human-in-the-Loop) gates
+    enable_hitl: true
+
+    # Context initialization
+    context_defaults:
+      aspect_ratio: "1:1"
+      metadata: {}
+
+    # Error handling
+    error_handling:
+      continue_on_error: false
+      log_errors: true
+
+    # Performance
+    timeout_seconds: 300  # 5 minutes max per agent
+
+# Alternative pipeline configurations (can switch via environment)
+pipelines:
+  # Quick pipeline without HITL
+  quick:
+    agents:
+      - planner
+      - generator
+      - critic
+    settings:
+      enable_hitl: false
+
+  # Style-focused pipeline
+  style_focused:
+    agents:
+      - planner
+      - art_director
+      - generator
+      - critic
+    settings:
+      enable_hitl: true
+
+  # Minimal pipeline (direct generation)
+  minimal:
+    agents:
+      - generator
+      - critic
+    settings:
+      enable_hitl: false
+
+# Active pipeline (can be overridden by environment variable PIPELINE_MODE)
+active_pipeline: pipeline

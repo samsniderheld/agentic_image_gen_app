@@ -1,0 +1,63 @@
+# Generator Agent Configuration
+name: generator
+display_name: Generator
+description: Generates images from combined prompts using the image generation backend
+
+# Model configuration (uses backend registry)
+model:
+  provider: registry  # Special: uses get_generator() from registry
+  backend_key: GENERATOR_BACKEND  # From config
+
+# Agent behavior
+instruction: |
+  Combine all prompt components (enriched prompt, style brief, shot brief) and generate the image.
+
+# Input/Output configuration
+inputs:
+  - name: enriched_prompt
+    type: string
+    source: context.enriched_prompt
+    fallback: context.original_prompt
+    description: The enriched prompt
+
+  - name: style_brief
+    type: string
+    source: context.style_brief
+    optional: true
+    description: Visual style definition
+
+  - name: shot_brief
+    type: string
+    source: context.shot_brief
+    optional: true
+    description: Shot specifications
+
+  - name: aspect_ratio
+    type: string
+    source: context.aspect_ratio
+    default: "1:1"
+    description: Image aspect ratio
+
+outputs:
+  - name: image
+    type: PIL.Image
+    target: context.image
+    description: Generated image
+
+  - name: final_generation_prompt
+    type: string
+    target: context.metadata.final_generation_prompt
+    description: The combined prompt used for generation
+
+# HITL configuration
+hitl:
+  enabled: false  # Generator doesn't have HITL gate, but image review happens after
+
+# Special behaviors
+behaviors:
+  combine_prompts: true  # Combine enriched_prompt, style_brief, shot_brief
+  separator: "\n\n"
+  save_output: true
+  output_path: outputs/00_initial.png
+
+type: generator_agent
