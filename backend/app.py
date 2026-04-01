@@ -117,38 +117,43 @@ def review_initial():
 # ── Pipeline Agent Reviews (HITL Gates) ───────────────────────────
 
 # Agent configuration: defines output fields, labels, and next agent
-AGENT_CONFIG = {
-    "planner": {
-        "output_field": "enriched_prompt",
-        "output_label": "Enriched prompt",
-        "thinking_revise": "Revising enriched prompt based on your feedback...",
-        "approval_message": "Approved enriched prompt.",
-        "next_agent": "art_director",
-        "next_stage": "awaiting_art_director_review",
-        "next_label": "Continue to style",
-        "feedback_to_field": "original_prompt",  # Where to inject feedback
-    },
-    "art_director": {
-        "output_field": "style_brief",
-        "output_label": "Style brief",
-        "thinking_revise": "Revising style brief based on your feedback...",
-        "approval_message": "Approved style brief.",
-        "next_agent": "dop",
-        "next_stage": "awaiting_dop_review",
-        "next_label": "Continue to shot setup",
-        "feedback_to_field": "enriched_prompt",
-    },
-    "dop": {
-        "output_field": "shot_brief",
-        "output_label": "Shot brief",
-        "thinking_revise": "Revising shot brief based on your feedback...",
-        "approval_message": "Approved shot setup. Generating image...",
-        "next_agent": "generator",
-        "next_stage": "awaiting_initial_review",
-        "next_label": "Generate image",
-        "feedback_to_field": "style_brief",
-    },
-}
+# Load AGENT_CONFIG from YAML files
+from models.yaml_loader import build_agent_config_dict
+AGENT_CONFIG = build_agent_config_dict()
+
+# Legacy hardcoded config (kept for reference, can be removed)
+# AGENT_CONFIG = {
+#     "planner": {
+#         "output_field": "enriched_prompt",
+#         "output_label": "Enriched prompt",
+#         "thinking_revise": "Revising enriched prompt based on your feedback...",
+#         "approval_message": "Approved enriched prompt.",
+#         "next_agent": "art_director",
+#         "next_stage": "awaiting_art_director_review",
+#         "next_label": "Continue to style",
+#         "feedback_to_field": "original_prompt",
+#     },
+#     "art_director": {
+#         "output_field": "style_brief",
+#         "output_label": "Style brief",
+#         "thinking_revise": "Revising style brief based on your feedback...",
+#         "approval_message": "Approved style brief.",
+#         "next_agent": "dop",
+#         "next_stage": "awaiting_dop_review",
+#         "next_label": "Continue to shot setup",
+#         "feedback_to_field": "enriched_prompt",
+#     },
+#     "dop": {
+#         "output_field": "shot_brief",
+#         "output_label": "Shot brief",
+#         "thinking_revise": "Revising shot brief based on your feedback...",
+#         "approval_message": "Approved shot setup. Generating image...",
+#         "next_agent": "generator",
+#         "next_stage": "awaiting_initial_review",
+#         "next_label": "Generate image",
+#         "feedback_to_field": "style_brief",
+#     },
+# }
 
 @app.post("/api/review/agent")
 def review_agent():

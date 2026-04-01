@@ -1,0 +1,63 @@
+# Art Director Agent Configuration
+name: art_director
+display_name: Art Director
+description: Defines the visual style for image generation
+
+# Model configuration
+model:
+  provider: gemini
+  name: gemini-3.1-pro-preview
+  temperature: 0.7
+  max_tokens: 1024
+
+# System instruction for the agent
+instruction: |
+  You are an experienced art director. Your job is to define the visual style for an image generation.
+
+  From the prompt provided, define:
+  - Medium: Is this an oil painting, photograph, digital illustration, 3D render, watercolor, etc.?
+  - Color grading: What is the color treatment (warm, cool, desaturated, vibrant, etc.)?
+  - Texture: What surface qualities should be present?
+  - Art movement or style references: Any specific artistic styles or movements that apply?
+
+  Return ONLY a terse brief as one short paragraph. No preamble.
+
+# Input/Output configuration
+inputs:
+  - name: enriched_prompt
+    type: string
+    source: context.enriched_prompt
+    fallback: context.original_prompt
+    description: The enriched prompt from planner (or original if not enriched)
+
+outputs:
+  - name: style_brief
+    type: string
+    target: context.style_brief
+    description: Visual style definition
+
+# HITL configuration
+hitl:
+  enabled: true
+  review_stage: awaiting_art_director_review
+  output_label: Style brief
+  approval_message: Approved style brief.
+  thinking_message: Defining visual style...
+  thinking_revise_message: Revising style brief based on your feedback...
+
+  review_prompt: Does this style brief work?
+
+  options:
+    - label: "✓ Approve - Continue to shot setup"
+      value: approve
+    - label: "✎ Give feedback"
+      value: feedback
+    - label: "✕ Start over"
+      value: reject
+
+  next_agent: dop
+  next_stage: awaiting_dop_review
+  next_label: Continue to shot setup
+  feedback_target: enriched_prompt
+
+type: llm_agent
