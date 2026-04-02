@@ -1,81 +1,104 @@
-import { useState, useRef } from "react";
+import { useState, useRef } from 'react';
 
-export default function InputBar({ onSend, disabled, placeholder }) {
-  const [text, setText] = useState("");
+export default function InputBar({ onSend, disabled, stage }) {
+  const [text, setText] = useState('');
   const [images, setImages] = useState([]);
-  const textRef = useRef(null);
-  const fileRef = useRef(null);
+  const fileInputRef = useRef(null);
+  const textareaRef = useRef(null);
 
-  const submit = () => {
-    const val = text.trim();
-    if ((!val && images.length === 0) || disabled) return;
-    setText("");
-    setImages([]);
-    textRef.current.style.height = "auto";
-    onSend(val, images);
+  const handleSend = () => {
+    if (text.trim() || images.length > 0) {
+      onSend({ text: text.trim(), images });
+      setText('');
+      setImages([]);
+    }
   };
 
-  const onKey = (e) => {
-    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); }
+  const handleKeyDown = (e) => {
+    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+      e.preventDefault();
+      handleSend();
+    }
   };
 
-  const onInput = (e) => {
-    setText(e.target.value);
-    e.target.style.height = "auto";
-    e.target.style.height = e.target.scrollHeight + "px";
-  };
-
-  const handleImageUpload = (e) => {
+  const handleFileChange = (e) => {
     const files = Array.from(e.target.files);
-    files.forEach(file => {
-      if (file.type.startsWith('image/')) {
-        const reader = new FileReader();
-        reader.onload = (ev) => {
-          setImages(prev => [...prev, { name: file.name, data: ev.target.result }]);
-        };
-        reader.readAsDataURL(file);
-      }
+    files.forEach((file) => {
+      const reader = new FileReader();
+      reader.onload = (evt) => {
+        setImages((prev) => [...prev, evt.target.result]);
+      };
+      reader.readAsDataURL(file);
     });
-    e.target.value = null; // Reset input
   };
 
-  const removeImage = (index) => {
-    setImages(prev => prev.filter((_, i) => i !== index));
+  const removeImage = (idx) => {
+    setImages(images.filter((_, i) => i !== idx));
   };
+
+  // Auto-resize textarea
+  const handleTextChange = (e) => {
+    setText(e.target.value);
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+      textareaRef.current.style.height = textareaRef.current.scrollHeight + 'px';
+    }
+  };
+
+  if (stage === 'idle') {
+    return null; // Input is shown only after aspect ratio is selected
+  }
 
   return (
-    <div className="input-bar-container">
+    <div className="input-bar">
       {images.length > 0 && (
         <div className="image-previews">
-          {images.map((img, i) => (
-            <div key={i} className="image-preview">
-              <img src={img.data} alt={img.name} />
-              <button className="remove-img-btn" onClick={() => removeImage(i)}>×</button>
+          {images.map((img, idx) => (
+            <div key={idx} className="image-preview">
+              <img src={img} alt={`Upload ${idx + 1}`} />
+              <button className="image-preview-remove" onClick={() => removeImage(idx)}>
+                ✕
+              </button>
             </div>
           ))}
         </div>
       )}
-      <div className="input-bar">
+
+      <div className="input-controls">
         <button
-          className="attach-btn"
-          onClick={() => fileRef.current?.click()}
+          className="input-upload"
+          onClick={() => fileInputRef.current?.click()}
           disabled={disabled}
-          title="Attach images"
         >
           📎
         </button>
-        <input
-          ref={fileRef}
-          type="file"
-          accept="image/*"
-          multiple
-          style={{ display: 'none' }}
-          onChange={handleImageUpload}
+        <textarea
+          ref={textareaRef}
+          className="input-textarea"
+          placeholder="Describe your image..."
+          value={text}
+          onChange={handleTextChange}
+          onKeyDown={handleKeyDown}
+          disabled={disabled}
+          rows={1}
         />
-        <textarea ref={textRef} value={text} onInput={onInput} onKeyDown={onKey}
-          placeholder={placeholder} disabled={disabled} rows={1} />
-        <button className="send-btn" onClick={submit} disabled={disabled || (!text.trim() && images.length === 0)}>↑</button>
+        <button
+          className="input-send"
+          onClick={handleSend}
+          disabled={disabled || (!text.trim() && images.length === 0)}
+        >
+          Send
+        </button>
       </div>
+
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        multiple
+        style={{ display: 'none' }}
+        onChange={handleFileChange}
+      />
     </div>
   );
 }

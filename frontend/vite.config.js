@@ -5,12 +5,8 @@ export default defineConfig({
   plugins: [react()],
   server: {
     proxy: {
-      '/api': 'http://localhost:8000',
-      '/outputs': 'http://localhost:8000'
-    }
+      '/api': 'http://localhost:5001',
+      '/outputs': 'http://localhost:5001',
+    },
   },
-  build: {
-    outDir: 'dist',
-    emptyOutDir: true,
-  }
 });

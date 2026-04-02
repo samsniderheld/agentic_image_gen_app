@@ -1,169 +1,163 @@
-import { useState } from "react";
-import MessageList from "./chat/MessageList";
-import InputBar    from "./chat/InputBar";
-import * as api    from "./api";
-import "./styles.css";
-
-const WELCOME = { role: "agent", type: "text",
-  content: "Hi! Let's create an image. First, choose your aspect ratio:" };
-
-const ASPECT_RATIO_OPTIONS = { role: "agent", type: "options",
-  prompt: "Select aspect ratio:",
-  options: [
-    { label: "1:1 Square", value: "1:1" },
-    { label: "16:9 Landscape", value: "16:9" },
-    { label: "9:16 Portrait", value: "9:16" },
-    { label: "4:3 Standard", value: "4:3" }
-  ]
-};
+import { useState, useEffect } from 'react';
+import MessageList from './chat/MessageList';
+import InputBar from './chat/InputBar';
+import { action } from './api';
+import './styles.css';
 
 export default function App() {
-  const [messages,      setMessages]      = useState([WELCOME, ASPECT_RATIO_OPTIONS]);
-  const [stage,         setStage]         = useState("selecting_aspect_ratio");
-  const [aspectRatio,   setAspectRatio]   = useState("1:1");
-  const [awaitingInput, setAwaitingInput] = useState(null);
-  // awaitingInput: null | "edit"
+  const [messages, setMessages] = useState([]);
+  const [stage, setStage] = useState('idle');
+  const [aspectRatio, setAspectRatio] = useState('1:1');
+  const [working, setWorking] = useState(false);
 
-  const working = ["generating", "critiquing", "applying_fixes"].includes(stage);
+  useEffect(() => {
+    // Show welcome message and aspect ratio selector
+    setMessages([
+      {
+        type: 'text',
+        role: 'agent',
+        text: 'Welcome to the Agentic Image Generator! Select an aspect ratio to begin:',
+      },
+      {
+        type: 'options',
+        options: [
+          { label: '1:1 Square', value: '1:1' },
+          { label: '16:9 Landscape', value: '16:9' },
+          { label: '9:16 Portrait', value: '9:16' },
+          { label: '4:3 Classic', value: '4:3' },
+        ],
+        showFeedback: false,
+      },
+    ]);
+  }, []);
 
-  const append = (newMsgs) => setMessages(m => [...m, ...(newMsgs || [])]);
+  const handleAction = async (payload) => {
+    if (working) return;
 
-  const handleSend = async (text, images = []) => {
-    // Show user message with text and images
-    const userMsg = { role: "user", type: "text", content: text || "(images attached)" };
-    append([userMsg]);
-
-    // Show image previews if any
-    if (images.length > 0) {
-      images.forEach(img => {
-        append([{ role: "user", type: "image", url: img.data, caption: img.name }]);
-      });
-    }
-
-    if (awaitingInput === "edit") {
-      setAwaitingInput(null);
-      setStage("generating");
-      const res = await api.reviewInitial("edit", text);
-      setStage(res.stage);
-      append(res.messages);
-      return;
-    }
-
-    // idle → generate (with optional images)
-    setStage("generating");
-    const res = await api.generate({
-      prompt: text,
-      aspect_ratio: aspectRatio,
-      input_images: images.map(img => img.data)
-    });
-    setStage(res.stage);
-    append(res.messages);
-  };
-
-  const handleOption = async (value, feedback = null) => {
-    // Handle aspect ratio selection
-    if (["1:1", "16:9", "9:16", "4:3"].includes(value)) {
-      setAspectRatio(value);
-      append([
-        { role: "user", type: "text", content: `Selected ${value}` },
-        { role: "agent", type: "text", content: "Great! Now describe what you'd like to generate." }
+    setWorking(true);
+    try {
+      const result = await action({ action: 'review', ...payload });
+      setMessages(result.messages);
+      // Update stage if needed (could be derived from messages)
+    } catch (error) {
+      console.error('Action failed:', error);
+      setMessages((prev) => [
+        ...prev,
+        {
+          type: 'text',
+          role: 'agent',
+          text: `Error: ${error.message}`,
+        },
       ]);
-      setStage("idle");
+    } finally {
+      setWorking(false);
+    }
+  };
+
+  const handleSend = async ({ text, images }) => {
+    if (working) return;
+
+    // If we're at the aspect ratio selection stage
+    if (stage === 'idle' && messages.length === 2) {
+      // This shouldn't happen via InputBar, but handle it anyway
       return;
     }
 
-    // Handle initial image review (after generation, before critique)
-    if (stage === "awaiting_initial_review") {
-      if (value === "accept") {
-        setStage("critiquing");
-        const res = await api.critique(false); // false = initial critique
-        setStage(res.stage);
-        append(res.messages);
-        return;
-      } else if (value === "reject") {
-        setStage("idle");
-        append([{ role: "agent", type: "text", content: "Let's start over. What would you like to generate?" }]);
-        return;
-      }
+    setWorking(true);
+    try {
+      const result = await action({
+        action: 'generate',
+        prompt: text,
+        aspect_ratio: aspectRatio,
+        images: images,
+      });
+      setMessages(result.messages);
+      setStage('running');
+    } catch (error) {
+      console.error('Generate failed:', error);
+      setMessages((prev) => [
+        ...prev,
+        {
+          type: 'text',
+          role: 'agent',
+          text: `Error: ${error.message}`,
+        },
+      ]);
+    } finally {
+      setWorking(false);
     }
+  };
 
-    // Handle fixes review (after fixes applied, before finalization)
-    if (stage === "awaiting_fixes_review") {
-      if (value === "accept_all_fixes") {
-        setStage("finalizing");
-        const res = await api.acceptFix(true);
-        setStage(res.stage);
-        append(res.messages);
-        return;
-      } else if (value === "reject_all_fixes") {
-        setStage("finalizing");
-        const res = await api.acceptFix(false);
-        setStage(res.stage);
-        append(res.messages);
-        return;
-      } else if (value === "recritique") {
-        handleRecritique();
-        return;
-      }
-    }
+  const handleOptionClick = async (option) => {
+    if (working) return;
 
-    // Handle pipeline agent reviews with approve/feedback/reject
-    // Extract agent name from stage (e.g., "awaiting_planner_review" → "planner")
-    const agentMatch = stage.match(/^awaiting_(.+)_review$/);
-    if (agentMatch) {
-      const agentName = agentMatch[1];
-      setStage("processing");
-      const res = await api.reviewAgent(agentName, value, feedback);
-      setStage(res.stage);
-      append(res.messages);
+    // Handle aspect ratio selection
+    if (stage === 'idle' && ['1:1', '16:9', '9:16', '4:3'].includes(option.decision)) {
+      setAspectRatio(option.decision);
+      setStage('ready');
+      setMessages((prev) => [
+        ...prev,
+        {
+          type: 'text',
+          role: 'agent',
+          text: `Aspect ratio set to ${option.decision}. What would you like to create?`,
+        },
+      ]);
       return;
     }
 
-    // Handle other global actions
-    if (value === "start_over") {
-      setMessages([WELCOME, ASPECT_RATIO_OPTIONS]);
-      setStage("selecting_aspect_ratio");
-      setAspectRatio("1:1");
-      setAwaitingInput(null);
+    // Handle critique action
+    if (option.decision === 'critique') {
+      setWorking(true);
+      try {
+        const result = await action({ action: 'critique' });
+        setMessages(result.messages);
+      } catch (error) {
+        console.error('Critique failed:', error);
+      } finally {
+        setWorking(false);
+      }
+      return;
     }
-  };
 
-  const handleChecklist = async (ids, customFixes = []) => {
-    setStage("applying_fixes");
-    const res = await api.reviewFixes(ids, customFixes);
-    setStage(res.stage);
-    append(res.messages);
-  };
+    // Handle apply fixes
+    if (option.approved_fix_ids !== undefined) {
+      setWorking(true);
+      try {
+        const result = await action({ action: 'apply_fixes', ...option });
+        setMessages(result.messages);
+      } catch (error) {
+        console.error('Apply fixes failed:', error);
+      } finally {
+        setWorking(false);
+      }
+      return;
+    }
 
-  const handleRecritique = async () => {
-    setStage("running_critique");
-    const res = await api.critique(true);  // true = is_recritique
-    setStage(res.stage);
-    append(res.messages);
-  };
+    // Handle accept/reject/recritique after fixes
+    if (['accept', 'reject', 'recritique'].includes(option.decision)) {
+      setWorking(true);
+      try {
+        const result = await action({ action: 'accept_fix', decision: option.decision });
+        setMessages(result.messages);
+      } catch (error) {
+        console.error('Accept fix failed:', error);
+      } finally {
+        setWorking(false);
+      }
+      return;
+    }
 
-  const inputPlaceholder = awaitingInput
-    ? "Enter your updated prompt..."
-    : stage === "idle"
-    ? "Describe what you'd like to generate..."
-    : stage === "selecting_aspect_ratio"
-    ? "Select an aspect ratio first..."
-    : "Agent is working...";
+    // Handle generic review decisions
+    handleAction(option);
+  };
 
   return (
-    <div className="chat-shell">
-      <MessageList
-        messages={messages}
-        working={working}
-        onOption={handleOption}
-        onChecklist={handleChecklist}
-        onRecritique={handleRecritique}
-      />
-      <InputBar
-        onSend={handleSend}
-        disabled={(working && !awaitingInput) || stage === "selecting_aspect_ratio"}
-        placeholder={inputPlaceholder}
-      />
+    <div className="app">
+      <div className="chat-container">
+        <MessageList messages={messages} onAction={handleOptionClick} />
+        <InputBar onSend={handleSend} disabled={working} stage={stage} />
+      </div>
     </div>
   );
 }

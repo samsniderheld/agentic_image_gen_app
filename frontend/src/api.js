@@ -1,13 +1,16 @@
-const post = (path, body) =>
-  fetch(`/api${path}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  }).then(r => r.json());
+const API_BASE = '/api';
 
-// Every response includes { ...data, messages: [...newMessages] }
-export const generate      = (form)                 => post("/generate", form);
-export const reviewAgent   = (agent, decision, feedback) => post("/review/agent", { agent, decision, feedback });
-export const critique      = (isRecritique = false) => post("/critique", { is_recritique: isRecritique });
-export const reviewFixes   = (ids, customFixes = []) => post("/review/fixes", { approved_fix_ids: ids, custom_fixes: customFixes });
-export const acceptFix     = (accepted)             => post("/fix/accept", { accepted });
+export async function action(payload) {
+  const response = await fetch(`${API_BASE}/action`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || 'Request failed');
+  }
+
+  return response.json();
+}

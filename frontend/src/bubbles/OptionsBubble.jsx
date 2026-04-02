@@ -1,63 +1,53 @@
-import { useState } from "react";
-export default function OptionsBubble({ msg, onOption }) {
-  const [selected, setSelected] = useState(null);
+import { useState } from 'react';
+
+export default function OptionsBubble({ message, onAction }) {
   const [showFeedback, setShowFeedback] = useState(false);
-  const [feedbackText, setFeedbackText] = useState("");
-  const [submitting, setSubmitting] = useState(false);
+  const [feedback, setFeedback] = useState('');
 
-  const click = (val) => {
-    if (selected) return;
-
-    // If "feedback" is clicked, show input field
-    if (val === "feedback") {
+  const handleOptionClick = (value) => {
+    if (value === 'feedback') {
       setShowFeedback(true);
-      return;
+    } else {
+      onAction({ decision: value });
     }
-
-    setSelected(val);
-    onOption(val);
   };
 
-  const submitFeedback = () => {
-    if (!feedbackText.trim() || submitting) return;
-    setSubmitting(true);
-    setSelected("feedback");
-    onOption("feedback", feedbackText);
+  const handleSubmitFeedback = () => {
+    if (feedback.trim()) {
+      onAction({ decision: 'feedback', feedback: feedback.trim() });
+      setFeedback('');
+      setShowFeedback(false);
+    }
   };
 
   return (
     <div className="options-bubble">
-      {msg.prompt && <div className="prompt-text">{msg.prompt}</div>}
+      <div className="options-buttons">
+        {message.options.map((option, idx) => (
+          <button
+            key={idx}
+            className="option-button"
+            onClick={() => handleOptionClick(option.value)}
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
 
-      {!showFeedback ? (
-        <div className="option-row">
-          {msg.options.map(o => (
-            <button key={o.value}
-              className={`option-btn ${selected === o.value ? "selected" : ""}`}
-              onClick={() => click(o.value)} disabled={!!selected}>
-              {o.label}
-            </button>
-          ))}
-        </div>
-      ) : (
-        <div className="feedback-input">
+      {showFeedback && (
+        <div className="feedback-form">
           <textarea
+            className="feedback-textarea"
             placeholder="Enter your feedback..."
-            value={feedbackText}
-            onChange={(e) => setFeedbackText(e.target.value)}
+            value={feedback}
+            onChange={(e) => setFeedback(e.target.value)}
             autoFocus
-            rows={3}
-            disabled={submitting}
           />
-          <div className="feedback-buttons">
-            <button
-              onClick={submitFeedback}
-              disabled={!feedbackText.trim() || submitting}
-              className={submitting ? "submitting" : ""}
-            >
-              {submitting ? "Submitting..." : "Submit Feedback"}
+          <div className="feedback-actions">
+            <button className="feedback-submit" onClick={handleSubmitFeedback}>
+              Submit
             </button>
-            <button onClick={() => setShowFeedback(false)} disabled={submitting}>
+            <button className="feedback-cancel" onClick={() => setShowFeedback(false)}>
               Cancel
             </button>
           </div>

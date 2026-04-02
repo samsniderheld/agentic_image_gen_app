@@ -1,17 +1,16 @@
-export default function ComparisonBubble({ msg }) {
+export default function ComparisonBubble({ message }) {
   return (
     <div className="comparison-bubble">
-      <div className="sides">
-        <div className="side">
-          <div className="side-label">Before</div>
-          <img src={msg.leftUrl} alt="before" />
+      <div className="comparison-grid">
+        <div className="comparison-item">
+          <div className="comparison-label">{message.beforeLabel}</div>
+          <img src={message.before} alt={message.beforeLabel} />
         </div>
-        <div className="side">
-          <div className="side-label">After</div>
-          <img src={msg.rightUrl} alt="after" />
+        <div className="comparison-item">
+          <div className="comparison-label">{message.afterLabel}</div>
+          <img src={message.after} alt={message.afterLabel} />
         </div>
       </div>
-      {msg.caption && <div className="caption">{msg.caption}</div>}
     </div>
   );
 }

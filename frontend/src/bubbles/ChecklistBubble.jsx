@@ -1,123 +1,110 @@
-import { useState } from "react";
-export default function ChecklistBubble({ msg, onChecklist }) {
-  const [checked, setChecked] = useState(
-    Object.fromEntries(msg.items.map(i => [i.id, i.checked]))
+import { useState } from 'react';
+
+export default function ChecklistBubble({ message, onAction }) {
+  const [selectedFixes, setSelectedFixes] = useState(
+    message.fixes
+      .filter((f) => f.severity === 'high' || f.severity === 'medium')
+      .map((f) => f.fix_id)
   );
-  const [submitted, setSubmitted] = useState(false);
-  const [showCustomFixForm, setShowCustomFixForm] = useState(false);
-  const [customFixes, setCustomFixes] = useState([]);
-  const [customFixPrompt, setCustomFixPrompt] = useState("");
+  const [customFixes, setCustomFixes] = useState(['']);
 
-  const toggle = (id) => setChecked(c => ({ ...c, [id]: !c[id] }));
-
-  const addCustomFix = () => {
-    if (!customFixPrompt.trim()) return;
-
-    const newFix = {
-      id: `custom_${customFixes.length}`,
-      label: customFixPrompt.trim(),
-      severity: "medium"
-    };
-
-    setCustomFixes([...customFixes, newFix]);
-    setChecked(c => ({ ...c, [newFix.id]: true }));
-    setCustomFixPrompt("");
+  const toggleFix = (fixId) => {
+    setSelectedFixes((prev) =>
+      prev.includes(fixId) ? prev.filter((id) => id !== fixId) : [...prev, fixId]
+    );
   };
 
-  const removeCustomFix = (id) => {
-    setCustomFixes(customFixes.filter(f => f.id !== id));
-    setChecked(c => {
-      const newChecked = { ...c };
-      delete newChecked[id];
-      return newChecked;
+  const addCustomFix = () => {
+    setCustomFixes([...customFixes, '']);
+  };
+
+  const updateCustomFix = (idx, value) => {
+    const updated = [...customFixes];
+    updated[idx] = value;
+    setCustomFixes(updated);
+  };
+
+  const removeCustomFix = (idx) => {
+    setCustomFixes(customFixes.filter((_, i) => i !== idx));
+  };
+
+  const handleApply = () => {
+    const custom = customFixes.filter((f) => f.trim());
+    onAction({
+      approved_fix_ids: selectedFixes,
+      custom_fixes: custom,
     });
   };
 
-  const submit = () => {
-    setSubmitted(true);
-    const selectedIds = Object.entries(checked).filter(([,v]) => v).map(([k]) => k);
-    onChecklist(selectedIds, customFixes);
+  const severityColor = (severity) => {
+    if (severity === 'high') return '#ff4444';
+    if (severity === 'medium') return '#ffaa00';
+    return '#888';
   };
-
-  const totalSelected = Object.values(checked).filter(Boolean).length;
 
   return (
     <div className="checklist-bubble">
-      <div className="prompt-text">{msg.prompt}</div>
-      {msg.items.map(item => (
-        <label key={item.id} className="checklist-item">
-          <input type="checkbox" checked={!!checked[item.id]}
-            onChange={() => toggle(item.id)} disabled={submitted} />
-          <span className={`severity-chip chip-${item.severity}`}>{item.severity}</span>
-          {item.label}
-        </label>
-      ))}
+      <div className="checklist-header">Select fixes to apply:</div>
 
-      {customFixes.map(fix => (
-        <label key={fix.id} className="checklist-item custom-fix-item">
-          <input type="checkbox" checked={!!checked[fix.id]}
-            onChange={() => toggle(fix.id)} disabled={submitted} />
-          <span className={`severity-chip chip-${fix.severity}`}>CUSTOM</span>
-          {fix.label}
-          {!submitted && (
-            <button
-              className="remove-custom-fix-btn"
-              onClick={(e) => {
-                e.preventDefault();
-                removeCustomFix(fix.id);
-              }}
-            >
-              ✕
-            </button>
-          )}
-        </label>
-      ))}
+      <div className="checklist-items">
+        {message.fixes.map((fix) => (
+          <div key={fix.fix_id} className="checklist-item">
+            <label className="checklist-label">
+              <input
+                type="checkbox"
+                checked={selectedFixes.includes(fix.fix_id)}
+                onChange={() => toggleFix(fix.fix_id)}
+              />
+              <span className="checklist-text">
+                <span
+                  className="severity-chip"
+                  style={{ backgroundColor: severityColor(fix.severity) }}
+                >
+                  {fix.severity}
+                </span>
+                {fix.issue_description}
+              </span>
+            </label>
+          </div>
+        ))}
+      </div>
 
-      {!submitted && (
-        <div className="custom-fix-section">
-          <button
-            className="toggle-custom-fix-btn"
-            onClick={() => setShowCustomFixForm(!showCustomFixForm)}
-          >
-            {showCustomFixForm ? "− Hide Custom Fix" : "+ Add Custom Fix"}
-          </button>
-
-          {showCustomFixForm && (
-            <div className="custom-fix-form">
-              <textarea
-                value={customFixPrompt}
-                onChange={(e) => setCustomFixPrompt(e.target.value)}
-                placeholder="Describe the custom fix you'd like to apply..."
-                rows={3}
+      {message.allowCustom && (
+        <div className="custom-fixes">
+          <div className="custom-fixes-header">Custom fixes:</div>
+          {customFixes.map((fix, idx) => (
+            <div key={idx} className="custom-fix-row">
+              <input
+                type="text"
+                className="custom-fix-input"
+                placeholder="Describe a fix..."
+                value={fix}
+                onChange={(e) => updateCustomFix(idx, e.target.value)}
               />
               <button
-                className="add-custom-fix-btn"
-                onClick={addCustomFix}
-                disabled={!customFixPrompt.trim()}
+                className="custom-fix-remove"
+                onClick={() => removeCustomFix(idx)}
               >
-                Add Fix
+                ✕
               </button>
             </div>
-          )}
+          ))}
+          <button className="custom-fix-add" onClick={addCustomFix}>
+            + Add custom fix
+          </button>
         </div>
       )}
 
       <div className="checklist-actions">
-        <button className="apply-btn" onClick={submit} disabled={submitted}>
-          {submitted
-            ? "Applying…"
-            : `Apply ${totalSelected} Selected Fix${totalSelected !== 1 ? 'es' : ''}`
-          }
+        <button className="checklist-apply" onClick={handleApply}>
+          Apply Selected Fixes
         </button>
-        {!submitted && msg.allowRecritique && (
+        {message.allowRecritique && (
           <button
-            className="recritique-btn"
-            onClick={() => {
-              setSubmitted(true);
-              if (msg.onRecritique) msg.onRecritique();
-            }}
+            className="checklist-recritique"
+            onClick={() => onAction({ action: 'critique' })}
           >
-            🔄 Run Critique Again
+            Re-critique
           </button>
         )}
       </div>

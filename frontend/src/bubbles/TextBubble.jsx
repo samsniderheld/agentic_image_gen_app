@@ -1,3 +1,7 @@
-export default function TextBubble({ msg }) {
-  return <div className={`bubble ${msg.role}`}>{msg.content}</div>;
+export default function TextBubble({ message }) {
+  return (
+    <div className={`text-bubble ${message.role}`}>
+      <div className="text-content">{message.text}</div>
+    </div>
+  );
 }

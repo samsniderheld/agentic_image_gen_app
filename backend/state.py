@@ -1,26 +1,24 @@
-from PIL import Image
-
 pipeline = {
-    "stage":               "idle",
-    "request":             None,
-    "current_image_path":  None,   # Path to current image (always the latest version)
-    "original_image_path": None,   # Path to original generated image (for comparison)
-    "input_images":        [],     # List[PIL.Image] - input images for composition
-    "aspect_ratio":        "1:1",  # Store aspect ratio for consistent generation
-    "critique":            None,
-    "messages":            [],     # chat message dicts appended by routes
-
-    # Pipeline context for HITL workflow
-    "pipeline_context":    None,   # PipelineContext object stored between agent runs
+    "stage": "idle",
+    "messages": [],       # list of message dicts sent to the frontend
+    "context": {},        # shared flat dict flowing through agents
+    "agents": [],         # list[AgentConfig] for the active pipeline
+    "hitl_config": {},    # from build_hitl_config()
+    "current_agent_index": 0,  # current position in the agents list
+    "original_image_path": None,
+    "current_image_path": None,
+    "critique": None,
 }
 
 def reset():
     pipeline.update({
-        "stage": "idle", "request": None,
-        "current_image_path": None, "original_image_path": None,
-        "input_images": [], "aspect_ratio": "1:1", "critique": None,
-        "messages": [], "pipeline_context": None,
+        "stage": "idle",
+        "messages": [],
+        "context": {},
+        "agents": [],
+        "hitl_config": {},
+        "current_agent_index": 0,
+        "original_image_path": None,
+        "current_image_path": None,
+        "critique": None,
     })
-
-def push_message(msg: dict):
-    pipeline["messages"].append(msg)

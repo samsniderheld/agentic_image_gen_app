@@ -1,43 +1,21 @@
-# Critic Agent Configuration
 name: critic
 display_name: Critic
-description: Provides vision critique and suggests fixes for generated images
+description: Analyzes image quality and suggests improvements
+type: critic_agent
 
-# Model configuration (uses backend registry)
 model:
-  provider: registry  # Special: uses get_critic() from registry
-  backend_key: CRITIC_BACKEND  # From config
+  provider: gemini
+  name: gemini-3.1-pro-preview
 
-# Agent behavior
-instruction: |
-  Analyze the image against the original prompt and provide detailed critique with actionable fixes.
-
-# Input/Output configuration
 inputs:
   - name: image
-    type: PIL.Image
-    source: context.image
-    description: The image to critique
-
+    source: image
   - name: original_prompt
-    type: string
-    source: context.original_prompt
-    description: The original user prompt
+    source: original_prompt
 
 outputs:
   - name: critique
-    type: dict
-    target: context.critiques
-    append: true
-    description: Critique result with overall_score, assessment, fixes_required
+    target: critique
 
-# HITL configuration
 hitl:
-  enabled: false  # Critique doesn't have HITL gate (fixes review happens in separate flow)
-
-# Special behaviors
-behaviors:
-  save_annotated: true
-  annotated_path: outputs/01_annotated.png
-
-type: critic_agent
+  enabled: false
