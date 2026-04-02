@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import Message from './Message';
 
-export default function MessageList({ messages, onAction }) {
+export default function MessageList({ messages, onAction, working }) {
   const endRef = useRef(null);
 
   useEffect(() => {
@@ -12,7 +12,7 @@ export default function MessageList({ messages, onAction }) {
     <div className="message-list">
       {messages.map((msg, idx) => (
         <div key={idx} className="message-wrapper">
-          <Message message={msg} onAction={onAction} />
+          <Message message={msg} onAction={onAction} working={working} />
         </div>
       ))}
       <div ref={endRef} />

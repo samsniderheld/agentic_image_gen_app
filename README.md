@@ -225,11 +225,11 @@ def call_llm(instruction: str, user_message: str, model_name: str,
 
 ### Image Generation Role
 ```python
-def generate_image(prompt: str, aspect_ratio: str,
+def generate_image(prompt: str, aspect_ratio: str, model_name: str,
                    input_images: list | None = None) -> PIL.Image
 
 def inpaint_image(image: PIL.Image, fix_prompts: list[str],
-                  aspect_ratio: str) -> PIL.Image
+                  aspect_ratio: str, model_name: str) -> PIL.Image
 ```
 
 ### Vision Critic Role

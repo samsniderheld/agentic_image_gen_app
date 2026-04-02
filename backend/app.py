@@ -275,12 +275,18 @@ def handle_apply_fixes(data):
     approved_fix_ids = data.get("approved_fix_ids", [])
     custom_fixes = data.get("custom_fixes", [])
 
+    print(f"DEBUG: Received data: {data}")
+    print(f"DEBUG: approved_fix_ids: {approved_fix_ids}")
+    print(f"DEBUG: custom_fixes: {custom_fixes}")
+
     # Build fix prompts
     fix_prompts = []
     for fix in state.pipeline["critique"]["fixes_required"]:
         if fix["fix_id"] in approved_fix_ids:
             fix_prompts.append(fix["fix_prompt"])
     fix_prompts.extend(custom_fixes)
+
+    print(f"DEBUG: Final fix_prompts: {fix_prompts}")
 
     if not fix_prompts:
         return jsonify({"error": "No fixes selected"}), 400
@@ -294,9 +300,16 @@ def handle_apply_fixes(data):
     # Apply fixes
     current_image = Image.open(state.pipeline["current_image_path"])
     aspect_ratio = state.pipeline["context"]["aspect_ratio"]
-    provider_name = state.pipeline["agents"][0].model_provider  # Use first agent's provider
 
-    fixed_image, fixed_path = runner.apply_fixes(current_image, fix_prompts, aspect_ratio, provider_name)
+    # Find the generator agent to get its model configuration
+    generator_agent = next((a for a in state.pipeline["agents"] if a.type == "generator_agent"), None)
+    if not generator_agent:
+        return jsonify({"error": "No generator agent found in pipeline"}), 400
+
+    provider_name = generator_agent.model_provider
+    model_name = generator_agent.model_name
+
+    fixed_image, fixed_path = runner.apply_fixes(current_image, fix_prompts, aspect_ratio, provider_name, model_name)
     state.pipeline["current_image_path"] = fixed_path
 
     # Add comparison message

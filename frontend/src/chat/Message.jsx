@@ -7,7 +7,7 @@ import ChecklistBubble from '../bubbles/ChecklistBubble';
 import CritiqueBubble from '../bubbles/CritiqueBubble';
 import FinalBubble from '../bubbles/FinalBubble';
 
-export default function Message({ message, onAction }) {
+export default function Message({ message, onAction, working }) {
   switch (message.type) {
     case 'text':
       return <TextBubble message={message} />;
@@ -18,13 +18,13 @@ export default function Message({ message, onAction }) {
     case 'comparison':
       return <ComparisonBubble message={message} />;
     case 'options':
-      return <OptionsBubble message={message} onAction={onAction} />;
+      return <OptionsBubble message={message} onAction={onAction} disabled={working} />;
     case 'checklist':
-      return <ChecklistBubble message={message} onAction={onAction} />;
+      return <ChecklistBubble message={message} onAction={onAction} disabled={working} />;
     case 'critique':
       return <CritiqueBubble message={message} />;
     case 'final':
-      return <FinalBubble message={message} onAction={onAction} />;
+      return <FinalBubble message={message} onAction={onAction} disabled={working} />;
     default:
       return <div>Unknown message type: {message.type}</div>;
   }

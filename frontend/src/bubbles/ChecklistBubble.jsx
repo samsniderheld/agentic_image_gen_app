@@ -1,6 +1,6 @@
 import { useState } from 'react';
 
-export default function ChecklistBubble({ message, onAction }) {
+export default function ChecklistBubble({ message, onAction, disabled }) {
   const [selectedFixes, setSelectedFixes] = useState(
     message.fixes
       .filter((f) => f.severity === 'high' || f.severity === 'medium')
@@ -30,10 +30,12 @@ export default function ChecklistBubble({ message, onAction }) {
 
   const handleApply = () => {
     const custom = customFixes.filter((f) => f.trim());
-    onAction({
+    const payload = {
       approved_fix_ids: selectedFixes,
       custom_fixes: custom,
-    });
+    };
+    console.log('ChecklistBubble sending payload:', payload);
+    onAction(payload);
   };
 
   const severityColor = (severity) => {
@@ -96,13 +98,14 @@ export default function ChecklistBubble({ message, onAction }) {
       )}
 
       <div className="checklist-actions">
-        <button className="checklist-apply" onClick={handleApply}>
+        <button className="checklist-apply" onClick={handleApply} disabled={disabled}>
           Apply Selected Fixes
         </button>
         {message.allowRecritique && (
           <button
             className="checklist-recritique"
             onClick={() => onAction({ action: 'critique' })}
+            disabled={disabled}
           >
             Re-critique
           </button>

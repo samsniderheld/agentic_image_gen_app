@@ -50,7 +50,14 @@ export default function InputBar({ onSend, disabled, stage }) {
   }
 
   return (
-    <div className="input-bar">
+    <div className={`input-bar ${disabled ? 'input-bar-disabled' : ''}`}>
+      {disabled && (
+        <div className="input-processing">
+          <div className="processing-spinner"></div>
+          <span>Processing...</span>
+        </div>
+      )}
+
       {images.length > 0 && (
         <div className="image-previews">
           {images.map((img, idx) => (
@@ -75,7 +82,7 @@ export default function InputBar({ onSend, disabled, stage }) {
         <textarea
           ref={textareaRef}
           className="input-textarea"
-          placeholder="Describe your image..."
+          placeholder={disabled ? "Processing..." : "Describe your image..."}
           value={text}
           onChange={handleTextChange}
           onKeyDown={handleKeyDown}
@@ -87,7 +94,7 @@ export default function InputBar({ onSend, disabled, stage }) {
           onClick={handleSend}
           disabled={disabled || (!text.trim() && images.length === 0)}
         >
-          Send
+          {disabled ? '...' : 'Send'}
         </button>
       </div>
 

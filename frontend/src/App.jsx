@@ -124,7 +124,9 @@ export default function App() {
     if (option.approved_fix_ids !== undefined) {
       setWorking(true);
       try {
-        const result = await action({ action: 'apply_fixes', ...option });
+        const payload = { action: 'apply_fixes', ...option };
+        console.log('App.jsx sending to backend:', payload);
+        const result = await action(payload);
         setMessages(result.messages);
       } catch (error) {
         console.error('Apply fixes failed:', error);
@@ -155,7 +157,7 @@ export default function App() {
   return (
     <div className="app">
       <div className="chat-container">
-        <MessageList messages={messages} onAction={handleOptionClick} />
+        <MessageList messages={messages} onAction={handleOptionClick} working={working} />
         <InputBar onSend={handleSend} disabled={working} stage={stage} />
       </div>
     </div>

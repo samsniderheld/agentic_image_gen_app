@@ -1,10 +1,11 @@
 import { useState } from 'react';
 
-export default function OptionsBubble({ message, onAction }) {
+export default function OptionsBubble({ message, onAction, disabled }) {
   const [showFeedback, setShowFeedback] = useState(false);
   const [feedback, setFeedback] = useState('');
 
   const handleOptionClick = (value) => {
+    if (disabled) return;
     if (value === 'feedback') {
       setShowFeedback(true);
     } else {
@@ -13,6 +14,7 @@ export default function OptionsBubble({ message, onAction }) {
   };
 
   const handleSubmitFeedback = () => {
+    if (disabled) return;
     if (feedback.trim()) {
       onAction({ decision: 'feedback', feedback: feedback.trim() });
       setFeedback('');
@@ -28,6 +30,7 @@ export default function OptionsBubble({ message, onAction }) {
             key={idx}
             className="option-button"
             onClick={() => handleOptionClick(option.value)}
+            disabled={disabled}
           >
             {option.label}
           </button>
@@ -41,13 +44,14 @@ export default function OptionsBubble({ message, onAction }) {
             placeholder="Enter your feedback..."
             value={feedback}
             onChange={(e) => setFeedback(e.target.value)}
+            disabled={disabled}
             autoFocus
           />
           <div className="feedback-actions">
-            <button className="feedback-submit" onClick={handleSubmitFeedback}>
+            <button className="feedback-submit" onClick={handleSubmitFeedback} disabled={disabled}>
               Submit
             </button>
-            <button className="feedback-cancel" onClick={() => setShowFeedback(false)}>
+            <button className="feedback-cancel" onClick={() => setShowFeedback(false)} disabled={disabled}>
               Cancel
             </button>
           </div>

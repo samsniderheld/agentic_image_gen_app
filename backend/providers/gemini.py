@@ -21,7 +21,10 @@ def call_llm(instruction, user_message, model_name, temperature, max_tokens) -> 
     return r.text.strip()
 
 # Image generation role
-def generate_image(prompt, aspect_ratio, input_images=None) -> Image.Image:
+def generate_image(prompt, aspect_ratio, model_name, input_images=None) -> Image.Image:
+    
+    print(f"prompt is: {prompt}")
+    
     config = types.GenerateContentConfig(
         image_config=types.ImageConfig(
             aspect_ratio=aspect_ratio,
@@ -41,14 +44,14 @@ def generate_image(prompt, aspect_ratio, input_images=None) -> Image.Image:
             ))
 
         response = _get_client().models.generate_content(
-            model="gemini-3-pro-image-preview",
+            model=model_name,
             contents=content_parts,
             config=config,
         )
     else:
         # Text-only prompt
         response = _get_client().models.generate_content(
-            model="gemini-3-pro-image-preview",
+            model=model_name,
             contents=prompt,
             config=config,
         )
@@ -56,9 +59,9 @@ def generate_image(prompt, aspect_ratio, input_images=None) -> Image.Image:
     image_bytes = response.candidates[0].content.parts[0].inline_data.data
     return Image.open(io.BytesIO(image_bytes))
 
-def inpaint_image(image, fix_prompts, aspect_ratio) -> Image.Image:
+def inpaint_image(image, fix_prompts, aspect_ratio, model_name) -> Image.Image:
     prompt = "Fix the following issues:\n" + "\n".join(f"- {p}" for p in fix_prompts)
-    return generate_image(prompt, aspect_ratio, input_images=[image])
+    return generate_image(prompt, aspect_ratio, model_name, input_images=[image])
 
 def infer_composition_prompt(images) -> str:
     parts = []
@@ -81,7 +84,7 @@ def critique_image(image, original_prompt) -> dict:
         "You are an expert image critic. Analyze the image against the original prompt. "
         "Return JSON: overall_score (float 0-1), overall_assessment (str), "
         "fixes_required (array of {fix_id, severity: low|medium|high, "
-        "issue_description, fix_prompt}), pass_threshold_met (bool, true if score >= 0.8)."
+        "issue_description, fix_prompt}), pass_threshold_met (bool, true if score >= 0.9)."
     )
 
     r = _get_client().models.generate_content(

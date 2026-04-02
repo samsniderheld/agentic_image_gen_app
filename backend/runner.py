@@ -44,8 +44,12 @@ def _call_provider(config: AgentConfig, provider, inputs: dict):
             config.instruction, user_message,
             config.model_name, config.temperature, config.max_tokens,
         )
+    elif config.type == "generator_agent":
+        # generator_agent: add model_name to inputs
+        _, func_name = PROVIDER_DISPATCH[config.type]
+        return getattr(provider, func_name)(model_name=config.model_name, **inputs)
     else:
-        # generator_agent and critic_agent: YAML input names match provider kwarg names.
+        # critic_agent: YAML input names match provider kwarg names.
         _, func_name = PROVIDER_DISPATCH[config.type]
         return getattr(provider, func_name)(**inputs)
 
@@ -59,10 +63,10 @@ def _set_outputs(config: AgentConfig, context: dict, result) -> dict:
             context[spec["target"] + "_path"] = path
     return context
 
-def apply_fixes(image, fix_prompts: list, aspect_ratio: str, provider_name: str):
+def apply_fixes(image, fix_prompts: list, aspect_ratio: str, provider_name: str, model_name: str):
     """Inpainting helper used by the image generation pipeline."""
     provider = providers.get_image_provider(provider_name)
-    fixed = provider.inpaint_image(image, fix_prompts, aspect_ratio)
+    fixed = provider.inpaint_image(image, fix_prompts, aspect_ratio, model_name)
     path = os.path.join(OUTPUTS_DIR, "fixes_applied.png")
     fixed.save(path)
     return fixed, path
