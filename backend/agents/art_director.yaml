@@ -11,12 +11,17 @@ model:
 
 instruction: |
   You are an art director. Define the visual style: medium (photo/painting/illustration/3D),
-  color grading, texture, art movement. Return a single terse paragraph. No preamble.
+  color grading, texture, art movement. If reference images are provided, analyze their
+  visual style and incorporate relevant elements into your recommendations.
+  Return a single terse paragraph. No preamble.
 
 inputs:
   - name: enriched_prompt
     source: enriched_prompt
     fallback: original_prompt
+  - name: input_images
+    source: input_images
+    optional: true
 
 outputs:
   - name: style_brief

@@ -23,29 +23,49 @@ def run_agent(config: AgentConfig, context: dict) -> dict:
 def _resolve_inputs(config: AgentConfig, context: dict) -> dict:
     out = {}
     for spec in config.inputs:
+        print(f"DEBUG: Resolving input '{spec['name']}' from source '{spec['source']}'")
         v = context.get(spec["source"])
+        print(f"DEBUG: Got value from context: {v is not None} (type: {type(v).__name__ if v is not None else 'None'})")
+
         if v is None and spec.get("fallback"):
             v = context.get(spec["fallback"])
+            print(f"DEBUG: Used fallback, got: {v is not None}")
+
         if v is None and not spec.get("optional", False):
             v = spec.get("default")
+            print(f"DEBUG: Used default: {v}")
+
         if spec.get("combine_with") and v is not None:
             sep = spec.get("separator", "\n\n")
             parts = [v] + [context[k] for k in spec["combine_with"] if context.get(k)]
             v = sep.join(parts)
+            print(f"DEBUG: Combined with other fields")
+
         out[spec["name"]] = v
+        print(f"DEBUG: Final value for '{spec['name']}': {v is not None}")
+
+    print(f"DEBUG: Resolved inputs keys: {list(out.keys())}")
     return out
 
 def _call_provider(config: AgentConfig, provider, inputs: dict):
     if config.type == "llm_agent":
         # LLMs receive a system instruction + collapsed user message + model params.
-        # All data inputs are joined into the user message.
-        user_message = "\n\n".join(str(v) for v in inputs.values() if v is not None)
+        # Extract input_images separately if present
+        input_images = inputs.pop('input_images', None)
+
+        # All remaining data inputs are joined into the user message
+        user_message = "\n\n".join(str(v) for v in inputs.values() if v is not None and v != '')
+
         return provider.call_llm(
             config.instruction, user_message,
             config.model_name, config.temperature, config.max_tokens,
+            input_images=input_images
         )
     elif config.type == "generator_agent":
         # generator_agent: add model_name to inputs
+        print(f"DEBUG: Generator inputs: {list(inputs.keys())}")
+        if 'input_images' in inputs:
+            print(f"DEBUG: input_images value: {inputs['input_images']}")
         _, func_name = PROVIDER_DISPATCH[config.type]
         return getattr(provider, func_name)(model_name=config.model_name, **inputs)
     else:

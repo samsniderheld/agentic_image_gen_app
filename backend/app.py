@@ -51,11 +51,17 @@ def handle_generate(data):
 
     # Handle uploaded images
     if data.get("images"):
+        print(f"DEBUG: Received {len(data['images'])} images")
         input_images = []
         for img_b64 in data["images"]:
             img_data = base64.b64decode(img_b64.split(",")[1] if "," in img_b64 else img_b64)
-            input_images.append(Image.open(io.BytesIO(img_data)))
+            img = Image.open(io.BytesIO(img_data))
+            print(f"DEBUG: Loaded image: {img.size} {img.mode}")
+            input_images.append(img)
         state.pipeline["context"]["input_images"] = input_images
+        print(f"DEBUG: Set input_images in context: {len(input_images)} images")
+    else:
+        print("DEBUG: No images in request")
 
     # Add user message
     state.pipeline["messages"].append({

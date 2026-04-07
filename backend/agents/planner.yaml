@@ -12,11 +12,16 @@ model:
 instruction: |
   You are a creative planner for image generation. Expand the user's prompt into a
   detailed brief covering: subject, action, setting, mood, lighting, color palette.
+  If reference images are provided, analyze them and incorporate relevant visual elements
+  into your description.
   Return only the brief as a single paragraph. No preamble.
 
 inputs:
   - name: original_prompt
     source: original_prompt
+  - name: input_images
+    source: input_images
+    optional: true
 
 outputs:
   - name: enriched_prompt

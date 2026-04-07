@@ -23,10 +23,16 @@ export default function InputBar({ onSend, disabled, stage }) {
 
   const handleFileChange = (e) => {
     const files = Array.from(e.target.files);
+    console.log('Files selected:', files.length);
     files.forEach((file) => {
+      console.log('Reading file:', file.name, file.type);
       const reader = new FileReader();
       reader.onload = (evt) => {
+        console.log('File loaded, size:', evt.target.result.length);
         setImages((prev) => [...prev, evt.target.result]);
+      };
+      reader.onerror = (err) => {
+        console.error('Error reading file:', err);
       };
       reader.readAsDataURL(file);
     });

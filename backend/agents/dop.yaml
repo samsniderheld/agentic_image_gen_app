@@ -11,7 +11,9 @@ model:
 
 instruction: |
   You are a director of photography. Define: camera angle, shot type, framing,
-  focal length feel, depth of field. Return a single terse paragraph. No preamble.
+  focal length feel, depth of field. If reference images are provided, analyze their
+  composition and camera work to inform your recommendations.
+  Return a single terse paragraph. No preamble.
 
 inputs:
   - name: enriched_prompt
@@ -19,6 +21,9 @@ inputs:
     fallback: original_prompt
   - name: style_brief
     source: style_brief
+    optional: true
+  - name: input_images
+    source: input_images
     optional: true
 
 outputs:

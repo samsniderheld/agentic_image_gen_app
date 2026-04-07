@@ -12,19 +12,56 @@ def _get_client():
     return _client
 
 # LLM role
-def call_llm(instruction, user_message, model_name, temperature, max_tokens) -> str:
-    r = _get_client().models.generate_content(
-        model=model_name,
-        contents=f"{instruction}\n\n{user_message}",
-        config=types.GenerateContentConfig(temperature=temperature, max_output_tokens=max_tokens),
-    )
+def call_llm(instruction, user_message, model_name, temperature, max_tokens, input_images=None) -> str:
+    config = types.GenerateContentConfig(temperature=temperature, max_output_tokens=max_tokens)
+
+    # Build content with system instruction and user message
+    full_prompt = f"{instruction}\n\n{user_message}"
+
+    if input_images and len(input_images) > 0:
+        # Include images in the request for multimodal understanding
+        print(f"DEBUG call_llm: Including {len(input_images)} images in LLM request")
+        content_parts = []
+
+        # Add images first
+        for i, img in enumerate(input_images):
+            buf = io.BytesIO()
+            img.save(buf, format="PNG")
+            print(f"DEBUG call_llm: Adding image {i+1}: {img.size} {img.mode}")
+            content_parts.append(types.Part.from_bytes(
+                data=buf.getvalue(),
+                mime_type="image/png"
+            ))
+
+        # Add text prompt after images
+        content_parts.append(types.Part.from_text(text=full_prompt))
+
+        r = _get_client().models.generate_content(
+            model=model_name,
+            contents=content_parts,
+            config=config,
+        )
+    else:
+        # Text-only request
+        r = _get_client().models.generate_content(
+            model=model_name,
+            contents=full_prompt,
+            config=config,
+        )
+
     return r.text.strip()
 
 # Image generation role
 def generate_image(prompt, aspect_ratio, model_name, input_images=None) -> Image.Image:
-    
-    print(f"prompt is: {prompt}")
-    
+    print(f"DEBUG generate_image called:")
+    print(f"  prompt: {prompt[:100]}...")
+    print(f"  aspect_ratio: {aspect_ratio}")
+    print(f"  model_name: {model_name}")
+    print(f"  input_images: {input_images}")
+    print(f"  input_images type: {type(input_images)}")
+    if input_images:
+        print(f"  input_images length: {len(input_images)}")
+
     config = types.GenerateContentConfig(
         image_config=types.ImageConfig(
             aspect_ratio=aspect_ratio,
@@ -33,16 +70,19 @@ def generate_image(prompt, aspect_ratio, model_name, input_images=None) -> Image
 
     if input_images and len(input_images) > 0:
         # Build content with input images + prompt
+        print(f"DEBUG: Using {len(input_images)} reference images")
         content_parts = [prompt]
-        for img in input_images:
+        for i, img in enumerate(input_images):
             buf = io.BytesIO()
             img.save(buf, format="PNG")
+            print(f"DEBUG: Adding reference image {i+1}: {img.size} {img.mode}")
             # Create a Part with inline image data
             content_parts.append(types.Part.from_bytes(
                 data=buf.getvalue(),
                 mime_type="image/png"
             ))
 
+        print(f"DEBUG: Sending to Gemini with {len(content_parts)} parts (1 text + {len(input_images)} images)")
         response = _get_client().models.generate_content(
             model=model_name,
             contents=content_parts,
@@ -50,6 +90,7 @@ def generate_image(prompt, aspect_ratio, model_name, input_images=None) -> Image
         )
     else:
         # Text-only prompt
+        print("DEBUG: Sending text-only prompt to Gemini")
         response = _get_client().models.generate_content(
             model=model_name,
             contents=prompt,

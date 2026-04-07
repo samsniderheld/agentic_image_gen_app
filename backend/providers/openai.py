@@ -2,7 +2,7 @@
 # Requires OPENAI_API_KEY in .env
 from PIL import Image
 
-def call_llm(instruction, user_message, model_name, temperature, max_tokens) -> str:
+def call_llm(instruction, user_message, model_name, temperature, max_tokens, input_images=None) -> str:
     raise NotImplementedError("OpenAI LLM not yet implemented")
 
 def generate_image(prompt, aspect_ratio, model_name, input_images=None) -> Image.Image:

@@ -63,14 +63,18 @@ export default function App() {
       return;
     }
 
+    console.log('handleSend called with:', { text, imageCount: images.length });
+
     setWorking(true);
     try {
-      const result = await action({
+      const payload = {
         action: 'generate',
         prompt: text,
         aspect_ratio: aspectRatio,
         images: images,
-      });
+      };
+      console.log('Sending to backend:', { ...payload, images: `${images.length} images` });
+      const result = await action(payload);
       setMessages(result.messages);
       setStage('running');
     } catch (error) {
