@@ -8,6 +8,7 @@ PROVIDER_DISPATCH = {
     "llm_agent": ("get_llm_provider", "call_llm"),
     "generator_agent": ("get_image_provider", "generate_image"),
     "critic_agent": ("get_critic_provider", "critique_image"),
+    "video_agent": ("get_video_provider", "generate_video"),
 }
 
 def run_agent(config: AgentConfig, context: dict) -> dict:
@@ -66,6 +67,11 @@ def _call_provider(config: AgentConfig, provider, inputs: dict):
         print(f"DEBUG: Generator inputs: {list(inputs.keys())}")
         if 'input_images' in inputs:
             print(f"DEBUG: input_images value: {inputs['input_images']}")
+        _, func_name = PROVIDER_DISPATCH[config.type]
+        return getattr(provider, func_name)(model_name=config.model_name, **inputs)
+    elif config.type == "video_agent":
+        # video_agent: add model_name to inputs
+        print(f"DEBUG: Video agent inputs: {list(inputs.keys())}")
         _, func_name = PROVIDER_DISPATCH[config.type]
         return getattr(provider, func_name)(model_name=config.model_name, **inputs)
     else:

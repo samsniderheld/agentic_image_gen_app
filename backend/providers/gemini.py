@@ -1,7 +1,7 @@
 from google import genai
 from google.genai import types
 from PIL import Image
-import os, io, json
+import os, io, json, time
 
 _client = None
 
@@ -138,3 +138,97 @@ def critique_image(image, original_prompt) -> dict:
             system_instruction=system, response_mime_type="application/json"),
     )
     return json.loads(r.text)
+
+# Video generation role
+def generate_video(image, prompt, aspect_ratio="9:16", duration_seconds=8, resolution="1080p", model_name="veo-3.1-generate-preview"):
+    """
+    Generate a video from an image using Veo.
+    Returns the path to the saved video file.
+    """
+    print(f"DEBUG generate_video called:")
+    print(f"  prompt: {prompt[:100]}...")
+    print(f"  aspect_ratio: {aspect_ratio}")
+    print(f"  duration_seconds: {duration_seconds}")
+    print(f"  resolution: {resolution}")
+    print(f"  model_name: {model_name}")
+    print(f"  image: {image.size} {image.mode}")
+
+    # Get client with v1beta API version for video generation
+    video_client = genai.Client(
+        http_options={"api_version": "v1beta"},
+        api_key=os.getenv("GOOGLE_API_KEY")
+    )
+
+    # Save image to temporary file for upload
+    temp_image_path = os.path.join(os.path.dirname(__file__), "..", "outputs", "temp_video_input.png")
+    temp_image_path = os.path.abspath(temp_image_path)
+    os.makedirs(os.path.dirname(temp_image_path), exist_ok=True)
+    image.save(temp_image_path)
+
+    # Configure video generation
+    video_config = types.GenerateVideosConfig(
+        aspect_ratio=aspect_ratio,
+        number_of_videos=1,
+        duration_seconds=duration_seconds,
+        resolution=resolution,
+    )
+
+    # Start video generation
+    print("DEBUG: Starting video generation...")
+    # operation = video_client.models.generate_videos(
+    #     model=model_name,
+    #     source=types.VideoGenerationSource(
+    #         prompt=prompt,
+    #         image=types.Image(
+    #             gcs_uri=uploaded_file.uri,
+    #             mime_type="image/png"
+    #         ),
+    #     ),
+    #     config=video_config,
+    # )
+
+    operation = video_client.models.generate_videos(
+        model=model_name,
+        prompt=prompt,
+        image=types.Image.from_file(location=temp_image_path),
+        config=video_config,
+    )
+
+    # Poll for completion
+    print("DEBUG: Waiting for video generation to complete...")
+    poll_count = 0
+    while not operation.done:
+        poll_count += 1
+        print(f"DEBUG: Video generation in progress... (poll #{poll_count})")
+        time.sleep(10)
+        operation = video_client.operations.get(operation)
+
+    print("DEBUG: Video generation completed!")
+
+    # Get result
+    result = operation.result
+    if not result:
+        raise ValueError("Error occurred while generating video - no result returned")
+
+    generated_videos = result.generated_videos
+    if not generated_videos:
+        raise ValueError("No videos were generated")
+
+    print(f"DEBUG: Generated {len(generated_videos)} video(s)")
+
+    # Download and save the first video
+    generated_video = generated_videos[0]
+    print(f"DEBUG: Video URI: {generated_video.video.uri}")
+
+    video_client.files.download(file=generated_video.video)
+
+    # Save to outputs directory
+    video_path = os.path.join(os.path.dirname(__file__), "..", "outputs", "generated_video.mp4")
+    generated_video.video.save(video_path)
+    print(f"DEBUG: Video saved to {video_path}")
+
+    # Clean up temp image
+    if os.path.exists(temp_image_path):
+        os.remove(temp_image_path)
+
+    return video_path

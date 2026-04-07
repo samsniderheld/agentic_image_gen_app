@@ -5,7 +5,8 @@ type: generator_agent
 
 model:
   provider: gemini
-  name: gemini-3-pro-image-preview
+  name: gemini-3.1-flash-image-preview
+  # name: gemini-3-pro-image-preview
 
 inputs:
   - name: prompt
@@ -27,3 +28,10 @@ outputs:
 
 hitl:
   enabled: false
+  review_stage: awaiting_image
+  output_label: Generated Image
+  thinking_message: Generating Image
+  thinking_revise_message: Revising Image based on your feedback...
+  approve_label: "✓ Approve"
+  feedback_target: Image
+  approval_message: Image approved. Generating video...

@@ -1,0 +1,39 @@
+name: veo_generator
+display_name: Video Generator
+description: Generates video from image using Veo
+type: video_agent
+
+model:
+  provider: gemini
+  name: veo-3.1-fast-generate-preview
+  # name: veo-3.1-generate-preview
+
+inputs:
+  - name: image
+    source: image
+  - name: prompt
+    source: video_prompt
+    fallback: enriched_prompt
+  - name: aspect_ratio
+    source: aspect_ratio
+    default: "9:16"
+  - name: duration_seconds
+    source: duration_seconds
+    default: 8
+  - name: resolution
+    source: resolution
+    default: "1080p"
+
+outputs:
+  - name: video_path
+    target: video_path
+
+hitl:
+  enabled: true
+  review_stage: awaiting_video_review
+  output_label: Generated video
+  thinking_message: Generating video with Veo (this may take a few minutes)...
+  thinking_revise_message: Regenerating video...
+  approve_label: "✓ Accept Video"
+  feedback_target: video_prompt
+  approval_message: Video accepted!

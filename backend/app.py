@@ -176,11 +176,20 @@ def advance_pipeline():
             output_field = hitl_config["output_field"]
             output_value = state.pipeline["context"].get(output_field)
 
-            state.pipeline["messages"].append({
-                "type": "text",
-                "role": "agent",
-                "text": output_value
-            })
+            # Check if output is a video path (for video agents)
+            if current_agent.type == "video_agent" and isinstance(output_value, str) and output_value.endswith('.mp4'):
+                state.pipeline["messages"].append({
+                    "type": "video",
+                    "src": f"/outputs/{os.path.basename(output_value)}",
+                    "caption": "Generated video"
+                })
+            else:
+                # Text output
+                state.pipeline["messages"].append({
+                    "type": "text",
+                    "role": "agent",
+                    "text": output_value
+                })
 
             # Add options
             state.pipeline["messages"].append({
@@ -377,7 +386,12 @@ def handle_accept_fix(data):
 
 @app.route("/outputs/<path:filename>")
 def serve_output(filename):
-    return send_from_directory(OUTPUTS_DIR, filename)
+    response = send_from_directory(OUTPUTS_DIR, filename)
+    # Set appropriate MIME type and headers for videos
+    if filename.endswith('.mp4'):
+        response.headers['Content-Type'] = 'video/mp4'
+        response.headers['Accept-Ranges'] = 'bytes'
+    return response
 
 @app.route("/", defaults={"path": ""})
 @app.route("/<path:path>")
