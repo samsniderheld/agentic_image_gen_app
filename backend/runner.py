@@ -1,5 +1,7 @@
 from loader import AgentConfig
 import providers
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
 
 PROVIDER_DISPATCH = {
     "llm_agent": ("get_llm_provider", "call_llm"),
@@ -8,14 +10,34 @@ PROVIDER_DISPATCH = {
     "video_agent": ("get_video_provider", "generate_video"),
 }
 
+# Thread pool for running sync provider calls in parallel
+_executor = ThreadPoolExecutor(max_workers=10)
+
 def run_agent(config: AgentConfig, context: dict) -> dict:
+    """Synchronous wrapper for backward compatibility"""
+    return asyncio.run(run_agent_async(config, context))
+
+async def run_agent_async(config: AgentConfig, context: dict) -> dict:
+    """Async version that can be run in parallel"""
     if config.type not in PROVIDER_DISPATCH:
         raise ValueError(f"Unknown agent type: {config.type}")
     getter_name, _ = PROVIDER_DISPATCH[config.type]
     provider = getattr(providers, getter_name)(config.model_provider)
     inputs = _resolve_inputs(config, context)
-    result = _call_provider(config, provider, inputs)
+
+    # Run provider call in thread pool to avoid blocking
+    loop = asyncio.get_event_loop()
+    result = await loop.run_in_executor(_executor, _call_provider, config, provider, inputs)
+
     context = _set_outputs(config, context, result)
+    return context
+
+async def run_agents_parallel(agents: list, context: dict) -> dict:
+    """Run multiple agents in parallel where possible"""
+    # For now, run sequentially but with async support
+    # Future enhancement: detect independent agents and run them in parallel
+    for agent in agents:
+        context = await run_agent_async(agent, context)
     return context
 
 def _resolve_inputs(config: AgentConfig, context: dict) -> dict:

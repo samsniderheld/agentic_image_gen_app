@@ -31,9 +31,12 @@ images/
 
 # Output files
 backend/outputs/
+test_outputs/
 *.png
 *.jpg
 *.jpeg
+*.mp4
+*.gif
 
 # Node
 node_modules/
