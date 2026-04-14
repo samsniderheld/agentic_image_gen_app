@@ -1,8 +1,5 @@
 from loader import AgentConfig
 import providers
-import os
-
-OUTPUTS_DIR = os.path.join(os.path.dirname(__file__), "outputs")
 
 PROVIDER_DISPATCH = {
     "llm_agent": ("get_llm_provider", "call_llm"),
@@ -80,19 +77,7 @@ def _call_provider(config: AgentConfig, provider, inputs: dict):
         return getattr(provider, func_name)(**inputs)
 
 def _set_outputs(config: AgentConfig, context: dict, result) -> dict:
+    """Set outputs in context without saving to disk - app.py handles saving"""
     for spec in config.outputs:
         context[spec["target"]] = result
-        if spec.get("save_to_disk") and result is not None:
-            path = os.path.join(OUTPUTS_DIR, os.path.basename(spec["save_to_disk"]))
-            os.makedirs(OUTPUTS_DIR, exist_ok=True)
-            result.save(path)
-            context[spec["target"] + "_path"] = path
     return context
-
-def apply_fixes(image, fix_prompts: list, aspect_ratio: str, provider_name: str, model_name: str):
-    """Inpainting helper used by the image generation pipeline."""
-    provider = providers.get_image_provider(provider_name)
-    fixed = provider.inpaint_image(image, fix_prompts, aspect_ratio, model_name)
-    path = os.path.join(OUTPUTS_DIR, "fixes_applied.png")
-    fixed.save(path)
-    return fixed, path

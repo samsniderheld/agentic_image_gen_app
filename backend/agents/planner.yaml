@@ -28,7 +28,7 @@ outputs:
     target: enriched_prompt
 
 hitl:
-  enabled: true
+  enabled: false
   review_stage: awaiting_planner_review
   output_label: Enriched prompt
   thinking_message: Planning your prompt...

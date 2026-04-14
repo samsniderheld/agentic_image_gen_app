@@ -1,0 +1,139 @@
+# Pipeline Configuration for CLI runs
+# Usage: python run_pipeline.py --preset my_preset
+# Each preset can include 1-3 reference images
+
+presets:
+  # No reference images
+  noir:
+    prompt: "generate these two people in film noir movie poster"
+    images: 
+      - "./images/sam.jpg"
+      - "./images/natalie.jpg"
+
+  kungfu:
+    prompt: "generate these two people in a 70's kung fu movie fight"
+    images: 
+      - "./images/sam.jpg"
+      - "./images/ben.png"
+
+  animated:
+    prompt: "generate these two people in a 50s's animated movie poster in style of disney"
+    images: 
+      - "./images/natalie.jpg"
+      - "./images/ben.png"
+
+  romcom:
+    prompt: "generate these two people in a 90's romcom scene walking through central park"
+    images: 
+      - "./images/lindsey.jpg"
+      - "./images/ben.png"
+
+  scifi:
+    prompt: "generate these three people in a 80's scifi movie laser gun battle"
+    images: 
+      - "./images/sam.jpg"
+      - "./images/ben.png"
+      - "./images/natalie.jpg"
+
+  history:
+    prompt: "generate these three people in a scene from 60's film drama about the napoleonic wars"
+    images: 
+      - "./images/sam.jpg"
+      - "./images/ben.png"
+      - "./images/natalie.jpg"
+
+  beach1:
+    prompt: "generate this person on postcard depicting the beach at cannes in the year 2100"
+    images: 
+      # - "./images/sam.jpg"
+      # - "./images/ben.png"
+      - "./images/natalie.jpg"
+
+  beach2:
+    prompt: "generate this person on postcard depicting the beach at cannes in the year 1960"
+    images: 
+      # - "./images/sam.jpg"
+      # - "./images/ben.png"
+      - "./images/natalie.jpg"
+
+  beach3:
+    prompt: "generate these people at MTV Spring Break in the 90's. They should be dancing and having fun"
+    images: 
+      - "./images/sam.jpg"
+      - "./images/ben.png"
+      - "./images/natalie.jpg"
+      # - "./images/lindsey.jpg"
+
+  arcade1:
+    prompt: "generate this person as a legend in their final season, packing away their acoustic guitar. They are standing on the edge of a coastal town at dusk. They are wearing a weathered, vintage denim tour jacket adorned with faded patches. The atmosphere is quietly melancholy. Shot on 16mm film, heavy film grain, soft muted colors, cinematic lighting, deeply emotional and nostalgic."
+    images: 
+      - "./images/sam.jpg"
+      # - "./images/ben.png"
+      # - "./images/natalie.jpg"
+
+  arcade2:
+    prompt: "generate this person as someone seeing it for the first time, stepping out onto the surface of the moon with Earth visible in the sky. They are holding a futuristic, glowing silver synthesizer. The mood is dreamlike and full of wonder. Studio Glamour style, wearing a shimmering, high-fashion spacesuit made of sequined fabric and glass, soft glamorous rim lighting, ethereal aesthetic"
+    images: 
+      # - "./images/sam.jpg"
+      - "./images/ben.png"
+      # - "./images/natalie.jpg"
+
+  arcade3:
+    prompt: "generate these peopole as two rivals finally collaborating, leaning over a mixing desk inside a cliffside recording studio overlooking a sunny beach. They are both wearing stylish, clashing 1970s bohemian fashion—fringed vests and flared jeans. The mood is triumphant and joyful. Vintage photography style, faded warm borders, light leaks, authentic retro aesthetic."
+    images: 
+      - "./images/lindsey.jpg"
+      - "./images/natalie.jpg"
+
+  yellow:
+    prompt: "make an image of these three people playing pool on a yellow pool table with there skin painted yellow, hair dyed yellow, waring yellow clothing, in a yellow room with yellow furniture. Everything is yellow."
+    images: 
+      - "./images/sam.jpg"
+      - "./images/ben.png"
+      - "./images/natalie.jpg"
+
+  yellow2:
+    prompt: "make an image of this person in google blue, smoking a google red pipe, there skin painted blue, hair dyed blue, waring blue clothing, in a yellow room with yellow furniture. Everything is else yellow, except the person and their pipe."
+    images: 
+      # - "./images/sam.jpg"
+      - "./images/ben.png"
+      # - "./images/natalie.jpg"
+
+  art:
+      prompt: "make an image of this person a portrait in the style of edward hopper, they are wearing 50s clothing"
+      images: 
+        # - "./images/sam.jpg"
+        - "./images/lindsey.jpg"
+        # - "./images/ben.png"
+        # - "./images/natalie.jpg"
+  
+  hair:
+      prompt: "generate this person as someone from the 70's with farah fawcet hair."
+      images: 
+        # - "./images/sam.jpg"
+        # - "./images/lindsey.jpg"
+        # - "./images/ben.png"
+        - "./images/natalie.jpg"
+
+  metgala:
+      prompt: "generate this person walking on the red carpet, wearing an outrageious outfit at the met gala, except it takes place in Cannes. "
+      images: 
+        # - "./images/sam.jpg"
+        - "./images/lindsey.jpg"
+        # - "./images/ben.png"
+        # - "./images/natalie.jpg"
+
+  glam:
+      prompt: "generate this person as a glam rocker from the 70's"
+      images: 
+        - "./images/sam.jpg"
+        # - "./images/lindsey.jpg"
+        # - "./images/ben.png"
+        # - "./images/natalie.jpg"
+  
+  commercial:
+      prompt: "generate this person in a perfume ad"
+      images: 
+        # - "./images/sam.jpg"
+        - "./images/lindsey.jpg"
+        # - "./images/ben.png"
+        # - "./images/natalie.jpg"

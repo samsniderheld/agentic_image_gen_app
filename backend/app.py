@@ -1,8 +1,8 @@
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
-import state
 import loader
 import runner
+import providers
 from PIL import Image
 import base64
 import io
@@ -14,391 +14,161 @@ load_dotenv()
 app = Flask(__name__, static_folder="../frontend/dist")
 CORS(app)
 
-OUTPUTS_DIR = os.path.join(os.path.dirname(__file__), "outputs")
+@app.route("/api/generate_image", methods=["POST"])
+def generate_image():
+    """
+    Generate an image from a prompt and optional reference images.
 
-@app.route("/api/action", methods=["POST"])
-def action():
-    data = request.json
-    action_type = data.get("action")
+    Request body:
+    {
+        "prompt": "your prompt here",
+        "aspect_ratio": "1:1",  // optional, defaults to "1:1"
+        "images": ["base64_image_data", ...]  // optional reference images
+    }
 
+    Response:
+    {
+        "image_url": "/outputs/filename.png",
+        "context": { ... }  // full pipeline context for debugging
+    }
+    """
     try:
-        if action_type == "generate":
-            return handle_generate(data)
-        elif action_type == "review":
-            return handle_review(data)
-        elif action_type == "critique":
-            return handle_critique()
-        elif action_type == "apply_fixes":
-            return handle_apply_fixes(data)
-        elif action_type == "accept_fix":
-            return handle_accept_fix(data)
-        else:
-            return jsonify({"error": f"Unknown action: {action_type}"}), 400
+        data = request.json
+        prompt = data.get("prompt", "")
+        aspect_ratio = data.get("aspect_ratio", "1:1")
+        image_data_list = data.get("images", [])
+
+        if not prompt:
+            return jsonify({"error": "Prompt is required"}), 400
+
+        # Load pipeline
+        agents = loader.load_pipeline()
+
+        # Initialize context
+        context = {
+            "original_prompt": prompt,
+            "aspect_ratio": aspect_ratio
+        }
+
+        # Process reference images if provided
+        if image_data_list:
+            input_images = []
+            for img_b64 in image_data_list:
+                img_data = base64.b64decode(img_b64.split(",")[1] if "," in img_b64 else img_b64)
+                img = Image.open(io.BytesIO(img_data))
+                input_images.append(img)
+            context["input_images"] = input_images
+            print(f"DEBUG: Loaded {len(input_images)} reference images")
+
+        # Run all agents in sequence
+        for agent in agents:
+            print(f"Running agent: {agent.display_name}")
+            context = runner.run_agent(agent, context)
+
+        # Extract generated image from context
+        generated_image = context.get("image")
+        if not generated_image:
+            return jsonify({"error": "Pipeline did not produce an image"}), 500
+
+        # Convert image to base64
+        img_buffer = io.BytesIO()
+        generated_image.save(img_buffer, format="PNG")
+        img_base64 = base64.b64encode(img_buffer.getvalue()).decode('utf-8')
+        img_data_url = f"data:image/png;base64,{img_base64}"
+        print(f"Generated image: {generated_image.size} {generated_image.mode}")
+
+        # Return base64 image
+        return jsonify({
+            "image_data": img_data_url,
+            "context": {k: str(v) if not isinstance(v, (str, int, float, bool, type(None))) else v
+                       for k, v in context.items()}
+        })
+
     except Exception as e:
+        print(f"ERROR in generate_image: {e}")
+        import traceback
+        traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
-def handle_generate(data):
-    """Start a new pipeline run"""
-    state.reset()
 
-    # Load pipeline
-    state.pipeline["agents"] = loader.load_pipeline()
-    state.pipeline["hitl_config"] = loader.build_hitl_config(state.pipeline["agents"])
+@app.route("/api/generate_video", methods=["POST"])
+def generate_video():
+    """
+    Generate a video from an image.
 
-    # Initialize context with user inputs
-    state.pipeline["context"]["original_prompt"] = data.get("prompt", "")
-    state.pipeline["context"]["aspect_ratio"] = data.get("aspect_ratio", "1:1")
+    Request body:
+    {
+        "image_url": "/outputs/filename.png",
+        "prompt": "your prompt here",
+        "aspect_ratio": "9:16",  // optional, defaults to "9:16"
+        "duration_seconds": 8,  // optional, defaults to 8
+        "resolution": "1080p"  // optional, defaults to "1080p"
+    }
 
-    # Handle uploaded images
-    if data.get("images"):
-        print(f"DEBUG: Received {len(data['images'])} images")
-        input_images = []
-        for img_b64 in data["images"]:
-            img_data = base64.b64decode(img_b64.split(",")[1] if "," in img_b64 else img_b64)
-            img = Image.open(io.BytesIO(img_data))
-            print(f"DEBUG: Loaded image: {img.size} {img.mode}")
-            input_images.append(img)
-        state.pipeline["context"]["input_images"] = input_images
-        print(f"DEBUG: Set input_images in context: {len(input_images)} images")
-    else:
-        print("DEBUG: No images in request")
+    Response:
+    {
+        "video_url": "/outputs/filename.mp4"
+    }
+    """
+    try:
+        data = request.json
+        image_url = data.get("image_url", "")
+        prompt = data.get("prompt", "")
+        aspect_ratio = data.get("aspect_ratio", "9:16")
+        duration_seconds = data.get("duration_seconds", 8)
+        resolution = data.get("resolution", "1080p")
 
-    # Add user message
-    state.pipeline["messages"].append({
-        "type": "text",
-        "role": "user",
-        "text": data.get("prompt", "")
-    })
+        if not image_url:
+            return jsonify({"error": "image_data is required"}), 400
 
-    # Start pipeline
-    return advance_pipeline()
+        # Decode base64 image
+        if image_url.startswith("data:image"):
+            # Extract base64 data from data URL
+            img_data = image_url.split(",")[1] if "," in image_url else image_url
+            img_bytes = base64.b64decode(img_data)
+            image = Image.open(io.BytesIO(img_bytes))
+            print(f"Loaded image from base64: {image.size} {image.mode}")
+        else:
+            return jsonify({"error": "Invalid image_data format"}), 400
 
-def handle_review(data):
-    """Handle HITL review decisions"""
-    decision = data.get("decision")
-    current_agent = state.pipeline["agents"][state.pipeline["current_agent_index"]]
+        # Get video provider and generate video
+        video_provider = providers.get_video_provider("gemini")
+        video_bytes = video_provider(
+            image=image,
+            prompt=prompt,
+            aspect_ratio=aspect_ratio,
+            duration_seconds=duration_seconds,
+            resolution=resolution,
+            model_name="veo-3.1-generate-preview"
+        )
 
-    if decision == "approve":
-        # Add approval message
-        hitl = state.pipeline["hitl_config"][current_agent.name]
-        state.pipeline["messages"].append({
-            "type": "text",
-            "role": "agent",
-            "text": hitl["approval_message"]
+        print(f"Video generated: {len(video_bytes)} bytes")
+
+        # Convert video to base64
+        video_base64 = base64.b64encode(video_bytes).decode('utf-8')
+        video_data_url = f"data:video/mp4;base64,{video_base64}"
+        print(f"Video encoded to base64")
+
+        # Return base64 video
+        return jsonify({
+            "video_data": video_data_url
         })
 
-        # Advance to next agent
-        state.pipeline["current_agent_index"] += 1
-        return advance_pipeline()
+    except Exception as e:
+        print(f"ERROR in generate_video: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
 
-    elif decision == "feedback":
-        # Add feedback to context and re-run current agent
-        feedback = data.get("feedback", "")
-        hitl = state.pipeline["hitl_config"][current_agent.name]
-        feedback_target = hitl.get("feedback_target")
-
-        if feedback_target:
-            current_value = state.pipeline["context"].get(feedback_target, "")
-            state.pipeline["context"][feedback_target] = f"{current_value}\n\nFeedback: {feedback}"
-
-        # Add user feedback message
-        state.pipeline["messages"].append({
-            "type": "text",
-            "role": "user",
-            "text": feedback
-        })
-
-        # Add thinking message
-        state.pipeline["messages"].append({
-            "type": "thinking",
-            "text": hitl["thinking_revise"]
-        })
-
-        # Re-run current agent
-        state.pipeline["context"] = runner.run_agent(current_agent, state.pipeline["context"])
-
-        # Add output message
-        output_field = hitl["output_field"]
-        output_value = state.pipeline["context"].get(output_field)
-        state.pipeline["messages"].append({
-            "type": "text",
-            "role": "agent",
-            "text": output_value
-        })
-
-        # Add options again
-        state.pipeline["messages"].append({
-            "type": "options",
-            "options": [
-                {"label": hitl["approve_label"], "value": "approve"},
-                {"label": "Provide Feedback", "value": "feedback"},
-                {"label": "Start Over", "value": "reject"}
-            ],
-            "showFeedback": False
-        })
-
-        return jsonify({"messages": state.pipeline["messages"]})
-
-    elif decision == "reject":
-        state.reset()
-        state.pipeline["stage"] = "idle"
-        state.pipeline["messages"].append({
-            "type": "text",
-            "role": "agent",
-            "text": "Starting over. What would you like to create?"
-        })
-        return jsonify({"messages": state.pipeline["messages"]})
-
-def advance_pipeline():
-    """Run agents until we hit a HITL gate or finish"""
-    while state.pipeline["current_agent_index"] < len(state.pipeline["agents"]):
-        current_agent = state.pipeline["agents"][state.pipeline["current_agent_index"]]
-
-        # Add thinking message
-        hitl = current_agent.hitl
-        if hitl.get("enabled"):
-            thinking_msg = hitl.get("thinking_message", f"Running {current_agent.display_name}...")
-            state.pipeline["messages"].append({
-                "type": "thinking",
-                "text": thinking_msg
-            })
-
-        # Run agent
-        state.pipeline["context"] = runner.run_agent(current_agent, state.pipeline["context"])
-
-        # Check if this is a HITL agent
-        if hitl.get("enabled"):
-            # Set review stage
-            state.pipeline["stage"] = hitl.get("review_stage", f"awaiting_{current_agent.name}_review")
-
-            # Add output message
-            hitl_config = state.pipeline["hitl_config"][current_agent.name]
-            output_field = hitl_config["output_field"]
-            output_value = state.pipeline["context"].get(output_field)
-
-            # Check if output is a video path (for video agents)
-            if current_agent.type == "video_agent" and isinstance(output_value, str) and output_value.endswith('.mp4'):
-                state.pipeline["messages"].append({
-                    "type": "video",
-                    "src": f"/outputs/{os.path.basename(output_value)}",
-                    "caption": "Generated video"
-                })
-            else:
-                # Text output
-                state.pipeline["messages"].append({
-                    "type": "text",
-                    "role": "agent",
-                    "text": output_value
-                })
-
-            # Add options
-            state.pipeline["messages"].append({
-                "type": "options",
-                "options": [
-                    {"label": hitl_config["approve_label"], "value": "approve"},
-                    {"label": "Provide Feedback", "value": "feedback"},
-                    {"label": "Start Over", "value": "reject"}
-                ],
-                "showFeedback": False
-            })
-
-            return jsonify({"messages": state.pipeline["messages"]})
-
-        # If not HITL, continue to next agent
-        state.pipeline["current_agent_index"] += 1
-
-    # Pipeline finished - we should have an image
-    if "image_path" in state.pipeline["context"]:
-        img_path = state.pipeline["context"]["image_path"]
-        state.pipeline["original_image_path"] = img_path
-        state.pipeline["current_image_path"] = img_path
-        state.pipeline["stage"] = "awaiting_initial_review"
-
-        # Add image message
-        state.pipeline["messages"].append({
-            "type": "image",
-            "src": f"/outputs/{os.path.basename(img_path)}",
-            "caption": "Generated image"
-        })
-
-        # Add options
-        state.pipeline["messages"].append({
-            "type": "options",
-            "options": [
-                {"label": "Send to Critique", "value": "critique"},
-                {"label": "Start Over", "value": "reject"}
-            ],
-            "showFeedback": False
-        })
-
-    return jsonify({"messages": state.pipeline["messages"]})
-
-def handle_critique():
-    """Run the critic agent"""
-    state.pipeline["stage"] = "running_critique"
-
-    # Add thinking message
-    state.pipeline["messages"].append({
-        "type": "thinking",
-        "text": "Analyzing image..."
-    })
-
-    # Find critic agent in pipeline
-    critic_agent = next((a for a in state.pipeline["agents"] if a.type == "critic_agent"), None)
-    if not critic_agent:
-        return jsonify({"error": "No critic agent found in pipeline"}), 400
-
-    # Run critique
-    state.pipeline["context"] = runner.run_agent(critic_agent, state.pipeline["context"])
-    critique = state.pipeline["context"]["critique"]
-    state.pipeline["critique"] = critique
-
-    # Add critique message
-    state.pipeline["messages"].append({
-        "type": "critique",
-        "score": int(critique["overall_score"] * 100),
-        "assessment": critique["overall_assessment"],
-        "pass": critique["pass_threshold_met"]
-    })
-
-    # If passed, show final image
-    if critique["pass_threshold_met"]:
-        state.pipeline["stage"] = "done"
-        state.pipeline["messages"].append({
-            "type": "final",
-            "src": f"/outputs/{os.path.basename(state.pipeline['current_image_path'])}"
-        })
-    else:
-        # Show fix checklist
-        state.pipeline["stage"] = "awaiting_fix_review"
-        state.pipeline["messages"].append({
-            "type": "image",
-            "src": f"/outputs/{os.path.basename(state.pipeline['current_image_path'])}",
-            "caption": "Current image"
-        })
-        state.pipeline["messages"].append({
-            "type": "checklist",
-            "fixes": critique["fixes_required"],
-            "allowCustom": True,
-            "allowRecritique": True
-        })
-
-    return jsonify({"messages": state.pipeline["messages"]})
-
-def handle_apply_fixes(data):
-    """Apply selected fixes via inpainting"""
-    approved_fix_ids = data.get("approved_fix_ids", [])
-    custom_fixes = data.get("custom_fixes", [])
-
-    print(f"DEBUG: Received data: {data}")
-    print(f"DEBUG: approved_fix_ids: {approved_fix_ids}")
-    print(f"DEBUG: custom_fixes: {custom_fixes}")
-
-    # Build fix prompts
-    fix_prompts = []
-    for fix in state.pipeline["critique"]["fixes_required"]:
-        if fix["fix_id"] in approved_fix_ids:
-            fix_prompts.append(fix["fix_prompt"])
-    fix_prompts.extend(custom_fixes)
-
-    print(f"DEBUG: Final fix_prompts: {fix_prompts}")
-
-    if not fix_prompts:
-        return jsonify({"error": "No fixes selected"}), 400
-
-    # Add thinking message
-    state.pipeline["messages"].append({
-        "type": "thinking",
-        "text": "Applying fixes..."
-    })
-
-    # Apply fixes
-    current_image = Image.open(state.pipeline["current_image_path"])
-    aspect_ratio = state.pipeline["context"]["aspect_ratio"]
-
-    # Find the generator agent to get its model configuration
-    generator_agent = next((a for a in state.pipeline["agents"] if a.type == "generator_agent"), None)
-    if not generator_agent:
-        return jsonify({"error": "No generator agent found in pipeline"}), 400
-
-    provider_name = generator_agent.model_provider
-    model_name = generator_agent.model_name
-
-    fixed_image, fixed_path = runner.apply_fixes(current_image, fix_prompts, aspect_ratio, provider_name, model_name)
-    state.pipeline["current_image_path"] = fixed_path
-
-    # Add comparison message
-    state.pipeline["stage"] = "awaiting_fixes_review"
-    state.pipeline["messages"].append({
-        "type": "comparison",
-        "before": f"/outputs/{os.path.basename(state.pipeline['original_image_path'])}",
-        "after": f"/outputs/{os.path.basename(fixed_path)}",
-        "beforeLabel": "Original",
-        "afterLabel": "With fixes"
-    })
-
-    # Add options
-    state.pipeline["messages"].append({
-        "type": "options",
-        "options": [
-            {"label": "Accept", "value": "accept"},
-            {"label": "Reject", "value": "reject"},
-            {"label": "Re-critique", "value": "recritique"}
-        ],
-        "showFeedback": False
-    })
-
-    return jsonify({"messages": state.pipeline["messages"]})
-
-def handle_accept_fix(data):
-    """Handle acceptance/rejection of fixes"""
-    decision = data.get("decision", "accept")
-
-    if decision == "accept":
-        state.pipeline["stage"] = "done"
-        state.pipeline["messages"].append({
-            "type": "final",
-            "src": f"/outputs/{os.path.basename(state.pipeline['current_image_path'])}"
-        })
-    elif decision == "reject":
-        # Revert to original image
-        state.pipeline["current_image_path"] = state.pipeline["original_image_path"]
-        state.pipeline["stage"] = "awaiting_fix_review"
-
-        # Show original image again with fix checklist
-        state.pipeline["messages"].append({
-            "type": "image",
-            "src": f"/outputs/{os.path.basename(state.pipeline['current_image_path'])}",
-            "caption": "Original image"
-        })
-        state.pipeline["messages"].append({
-            "type": "checklist",
-            "fixes": state.pipeline["critique"]["fixes_required"],
-            "allowCustom": True,
-            "allowRecritique": True
-        })
-    elif decision == "recritique":
-        # Run critique on the fixed image
-        state.pipeline["context"]["image"] = Image.open(state.pipeline["current_image_path"])
-        return handle_critique()
-
-    return jsonify({"messages": state.pipeline["messages"]})
-
-@app.route("/outputs/<path:filename>")
-def serve_output(filename):
-    response = send_from_directory(OUTPUTS_DIR, filename)
-    # Set appropriate MIME type and headers for videos
-    if filename.endswith('.mp4'):
-        response.headers['Content-Type'] = 'video/mp4'
-        response.headers['Accept-Ranges'] = 'bytes'
-    return response
 
 @app.route("/", defaults={"path": ""})
 @app.route("/<path:path>")
 def serve_frontend(path):
+    """Serve the React frontend"""
     if path and os.path.exists(os.path.join(app.static_folder, path)):
         return send_from_directory(app.static_folder, path)
     return send_from_directory(app.static_folder, "index.html")
+
 
 if __name__ == "__main__":
     app.run(debug=True, port=8000)

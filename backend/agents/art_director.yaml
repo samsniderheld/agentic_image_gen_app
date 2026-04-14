@@ -28,7 +28,7 @@ outputs:
     target: style_brief
 
 hitl:
-  enabled: true
+  enabled: false
   review_stage: awaiting_art_director_review
   output_label: Style brief
   thinking_message: Defining visual style...

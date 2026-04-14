@@ -97,8 +97,15 @@ def generate_image(prompt, aspect_ratio, model_name, input_images=None) -> Image
             config=config,
         )
 
-    image_bytes = response.candidates[0].content.parts[0].inline_data.data
-    return Image.open(io.BytesIO(image_bytes))
+    # Extract image from response using proper method
+    for part in response.candidates[0].content.parts:
+        if part.inline_data is not None:
+            image_bytes = part.inline_data.data
+            generated_image = Image.open(io.BytesIO(image_bytes))
+            print('Successfully extracted image from Gemini response')
+            return generated_image
+
+    raise ValueError("No image found in Gemini response")
 
 def inpaint_image(image, fix_prompts, aspect_ratio, model_name) -> Image.Image:
     prompt = "Fix the following issues:\n" + "\n".join(f"- {p}" for p in fix_prompts)
@@ -143,8 +150,24 @@ def critique_image(image, original_prompt) -> dict:
 def generate_video(image, prompt, aspect_ratio="9:16", duration_seconds=8, resolution="1080p", model_name="veo-3.1-generate-preview"):
     """
     Generate a video from an image using Veo.
-    Returns the path to the saved video file.
+    Returns raw video bytes.
     """
+    # Veo only supports 16:9 and 9:16 aspect ratios
+    # Map other aspect ratios to supported ones
+    aspect_ratio_map = {
+        "1:1": "9:16",  # Square -> Portrait
+        "4:3": "16:9",  # Classic -> Landscape
+        "3:4": "9:16",  # Classic portrait -> Portrait
+        "16:9": "16:9",
+        "9:16": "9:16",
+    }
+
+    original_aspect = aspect_ratio
+    aspect_ratio = aspect_ratio_map.get(aspect_ratio, "9:16")
+
+    if original_aspect != aspect_ratio:
+        print(f"Note: Converted aspect ratio from {original_aspect} to {aspect_ratio} (Veo only supports 16:9 and 9:16)")
+
     print(f"DEBUG generate_video called:")
     print(f"  prompt: {prompt[:100]}...")
     print(f"  aspect_ratio: {aspect_ratio}")
@@ -216,19 +239,17 @@ def generate_video(image, prompt, aspect_ratio="9:16", duration_seconds=8, resol
 
     print(f"DEBUG: Generated {len(generated_videos)} video(s)")
 
-    # Download and save the first video
+    # Download video bytes from URI
     generated_video = generated_videos[0]
-    print(f"DEBUG: Video URI: {generated_video.video.uri}")
+    video_uri = generated_video.video.uri
+    print(f"DEBUG: Video URI: {video_uri}")
 
-    video_client.files.download(file=generated_video.video)
-
-    # Save to outputs directory
-    video_path = os.path.join(os.path.dirname(__file__), "..", "outputs", "generated_video.mp4")
-    generated_video.video.save(video_path)
-    print(f"DEBUG: Video saved to {video_path}")
+    # Download the video using the client - returns bytes directly
+    video_bytes = video_client.files.download(file=generated_video.video)
+    print(f"DEBUG: Downloaded video bytes: {len(video_bytes)} bytes")
 
     # Clean up temp image
     if os.path.exists(temp_image_path):
         os.remove(temp_image_path)
 
-    return video_path
+    return video_bytes

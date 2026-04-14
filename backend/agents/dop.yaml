@@ -31,7 +31,7 @@ outputs:
     target: shot_brief
 
 hitl:
-  enabled: true
+  enabled: false
   review_stage: awaiting_dop_review
   output_label: Shot brief
   thinking_message: Setting up the shot...

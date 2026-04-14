@@ -2,8 +2,8 @@ active_pipeline: default
 
 pipelines:
   default:
-    agents: [planner, generator, veo_generator]
-    # agents: [planner, art_director, dop, generator, critic]
+    # agents: [planner, art_director, dop, generator]  
+    agents: [planner, art_director, dop, generator, veo_generator]
 
   quick:
     agents: [planner, generator, critic]
