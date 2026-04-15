@@ -1,0 +1,52 @@
+name: script
+display_name: Script Writer
+description: Creates a narrative script based on the art direction
+type: llm_agent
+
+model:
+  provider: gemini
+  name: gemini-3-flash-preview
+  temperature: 0.8
+  max_tokens: 2048
+
+instruction: |
+  You are a creative script writer for visual storytelling. Based on the enriched prompt
+  and style brief, create a compelling narrative script that describes the story flow
+  across EXACTLY 6 SHOTS. Your script should outline 6 distinct key moments and transitions
+  that will be visualized as a sequence.
+  If reference images are provided, incorporate their visual themes into the narrative.
+
+  Structure your output as 6 numbered shots, each with a clear description:
+  Shot 1: [description]
+  Shot 2: [description]
+  Shot 3: [description]
+  Shot 4: [description]
+  Shot 5: [description]
+  Shot 6: [description]
+
+  Return only the 6 shots. No preamble or additional commentary.
+
+inputs:
+  - name: enriched_prompt
+    source: enriched_prompt
+    fallback: original_prompt
+  - name: style_brief
+    source: style_brief
+    optional: true
+  - name: input_images
+    source: input_images
+    optional: true
+
+outputs:
+  - name: script
+    target: script
+
+hitl:
+  enabled: false
+  review_stage: awaiting_script_review
+  output_label: Script
+  thinking_message: Writing the script...
+  thinking_revise_message: Revising script based on your feedback...
+  approve_label: "✓ Approve"
+  feedback_target: enriched_prompt
+  approval_message: Script approved. Creating storyboard...

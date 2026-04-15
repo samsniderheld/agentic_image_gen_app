@@ -1,0 +1,45 @@
+name: storyboard
+display_name: Storyboard Artist
+description: Creates a visual storyboard with 6 sketch panels in a 3x2 grid
+type: generator_agent
+
+model:
+  provider: gemini
+  name: gemini-3.1-flash-image-preview
+
+instruction: |
+  Generate a storyboard image showing 6 sketch panels arranged in a 3x2 grid (3 columns, 2 rows).
+  Each panel should visualize one shot from the script provided below.
+  The storyboard should have:
+  - Clear grid lines dividing the 6 panels
+  - Hand-drawn sketch aesthetic (not photorealistic)
+  - Each panel labeled "Shot 1" through "Shot 6"
+  - Rough, sketch-like quality suitable for a storyboard
+  Create one complete image containing all 6 panels in the grid layout.
+
+inputs:
+  - name: prompt
+    source: script
+    fallback: enriched_prompt
+    combine_with: [style_brief]
+    separator: "\n\n---\nSTYLE: "
+  - name: aspect_ratio
+    source: aspect_ratio
+    default: "16:9"
+  - name: input_images
+    source: input_images
+    optional: true
+
+outputs:
+  - name: storyboard_image
+    target: storyboard_image
+
+hitl:
+  enabled: false
+  review_stage: awaiting_storyboard
+  output_label: Storyboard
+  thinking_message: Creating storyboard...
+  thinking_revise_message: Revising storyboard based on your feedback...
+  approve_label: "✓ Approve"
+  feedback_target: script
+  approval_message: Storyboard approved. Processing shots...

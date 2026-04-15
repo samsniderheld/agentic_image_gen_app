@@ -12,8 +12,30 @@ def _get_client():
     return _client
 
 # LLM role
-def call_llm(instruction, user_message, model_name, temperature, max_tokens, input_images=None) -> str:
-    config = types.GenerateContentConfig(temperature=temperature, max_output_tokens=max_tokens)
+def call_llm(instruction, user_message, model_name, temperature, max_tokens, input_images=None, response_schema=None) -> str:
+    """
+    Call LLM with optional structured output schema.
+
+    Args:
+        instruction: System instruction
+        user_message: User message
+        model_name: Model to use
+        temperature: Sampling temperature
+        max_tokens: Maximum output tokens
+        input_images: Optional list of PIL Images
+        response_schema: Optional dict defining JSON schema for structured output
+
+    Returns:
+        str: Model response (plain text or JSON string if schema provided)
+    """
+    config_params = {"temperature": temperature, "max_output_tokens": max_tokens}
+
+    # Add structured output config if schema provided
+    if response_schema:
+        config_params["response_mime_type"] = "application/json"
+        config_params["response_schema"] = response_schema
+
+    config = types.GenerateContentConfig(**config_params)
 
     # Build content with system instruction and user message
     full_prompt = f"{instruction}\n\n{user_message}"

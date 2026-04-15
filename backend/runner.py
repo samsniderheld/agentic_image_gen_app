@@ -61,6 +61,17 @@ def _resolve_inputs(config: AgentConfig, context: dict) -> dict:
             v = sep.join(parts)
             print(f"DEBUG: Combined with other fields")
 
+        # Apply template if specified
+        if spec.get("template") and v is not None:
+            template = spec["template"]
+            # Build template context from current value and combined fields
+            template_vars = {spec["source"]: v}
+            if spec.get("combine_with"):
+                for key in spec["combine_with"]:
+                    template_vars[key] = context.get(key, "")
+            v = template.format(**template_vars)
+            print(f"DEBUG: Applied template")
+
         out[spec["name"]] = v
         print(f"DEBUG: Final value for '{spec['name']}': {v is not None}")
 
@@ -76,10 +87,16 @@ def _call_provider(config: AgentConfig, provider, inputs: dict):
         # All remaining data inputs are joined into the user message
         user_message = "\n\n".join(str(v) for v in inputs.values() if v is not None and v != '')
 
+        # Check if agent has structured output schema
+        response_schema = None
+        if hasattr(config, 'response_schema'):
+            response_schema = config.response_schema
+
         return provider.call_llm(
             config.instruction, user_message,
             config.model_name, config.temperature, config.max_tokens,
-            input_images=input_images
+            input_images=input_images,
+            response_schema=response_schema
         )
     elif config.type == "generator_agent":
         # generator_agent: add model_name to inputs

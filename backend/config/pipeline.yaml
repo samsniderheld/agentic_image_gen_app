@@ -2,7 +2,7 @@ active_pipeline: default
 
 pipelines:
   default:
-    # agents: [planner, art_director, dop, generator]  
+    # agents: [planner, art_director, dop, generator]
     agents: [planner, art_director, dop, generator, veo_generator]
 
   quick:
@@ -16,3 +16,9 @@ pipelines:
 
   with_video:
     agents: [planner, art_director, dop, generator, critic, veo_generator]
+
+  extended:
+    # New extended pipeline: planner -> art_director -> script -> storyboard
+    # Then parallel: 6x (dop -> generator -> veo_generator) -> final concatenation
+    # Note: The parallel execution is handled by run_pipeline_extended.py
+    agents: [planner, art_director, script, storyboard]
